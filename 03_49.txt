@@ -23,6 +23,9 @@ What is captured in 03.48:
 - This version is intended for testing by colleagues on macOS and Windows.
 
 What is new in 03.49:
+- Migrated to the new Gemini SDK: `from google import genai`, `genai.Client(api_key=...)` per call
+  (replaces the old `google.generativeai` SDK). Images and PDFs are uploaded via `client.files.upload()`
+  with `UploadFileConfig(mime_type=...)`; file state is polled until ACTIVE before sending to the model.
 - Added source_baseline_extractor.py (ported from webQCV): structured section-aware DOCX parsing
   with labeled sections (contact info, summary, skills, experience, education, etc.) for better LLM extraction.
   Falls back to plain text extraction if structured parsing fails.
