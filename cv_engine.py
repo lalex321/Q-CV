@@ -845,7 +845,8 @@ def sanitize_json(data):
     clean_title = raw_title
     if clean_title:
             clean_title = re.split(r'\s*\|\s*|\s*-\s*|\s*,\s*|\s+at\s+|\s+@\s+', clean_title, flags=re.IGNORECASE)[0].strip()
-            if len(clean_title) > 100 or len(clean_title) < 2: clean_title = "" 
+            if clean_title.isupper(): clean_title = clean_title.title()
+            if len(clean_title) > 100 or len(clean_title) < 2: clean_title = ""
 
     if not clean_title and data.get('experience'):
             fb = str(data['experience'][0].get('role', '')).replace('\n', ' ').strip()
@@ -1174,6 +1175,29 @@ def _collect_raw_text(ctx: dict) -> str:
             parts.append(v)
     return "\n".join([p.strip() for p in parts if isinstance(p,str) and p.strip()])
 
+def _format_docx_sections_for_llm(baseline: dict) -> str:
+    """Format structured DOCX sections into labeled text for the LLM."""
+    sections = baseline.get("sections", {})
+    section_labels = {
+        "preamble": "CONTACT INFO (name, location, email — NOT the job title)",
+        "summary": "SUMMARY",
+        "skills": "TECHNICAL SKILLS",
+        "experience": "WORK EXPERIENCE",
+        "education": "EDUCATION",
+        "certifications": "CERTIFICATIONS",
+        "languages": "LANGUAGES",
+    }
+    parts = []
+    for key, label in section_labels.items():
+        lines = sections.get(key, [])
+        if lines:
+            parts.append(f"=== {label} ===\n" + "\n".join(lines))
+    for key, lines in sections.items():
+        if key not in section_labels and lines:
+            parts.append(f"=== {key.upper().replace('_', ' ')} ===\n" + "\n".join(lines))
+    return "\n\n".join(parts)
+
+
 def extract_text_from_docx(docx_path: str) -> str:
     """Robust DOCX text extraction for CVs (paragraphs + tables + headers/footers)."""
     try:
@@ -1228,7 +1252,12 @@ def process_file_gemini(file_path, api_key, custom_instructions, task_state=None
     client = genai.Client(api_key=api_key)
 
     if file_path.lower().endswith('.docx'):
-        text = extract_text_from_docx(file_path)
+        try:
+            from source_baseline_extractor import extract_from_docx as _extract_from_docx
+            baseline = _extract_from_docx(file_path)
+            text = _format_docx_sections_for_llm(baseline)
+        except Exception:
+            text = extract_text_from_docx(file_path)
         if not text: raise ValueError("Empty DOCX")
         response = _retry_generate(client, MODEL_NAME, [final_prompt, text])
     else:
