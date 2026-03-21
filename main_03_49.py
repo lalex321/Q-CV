@@ -16,7 +16,8 @@ import base64
 import textwrap
 import random
 import traceback
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 import re
 from datetime import datetime
 from pathlib import Path
@@ -412,8 +413,7 @@ def main(page: ft.Page):
             api_dialog_error.value = "Please enter an API Key."; api_dialog_error.visible = True; page.update(); return
         api_dialog_error.visible = False; api_dialog_progress.visible = True; btn_verify_api.disabled = True; page.update()
         try:
-            genai.configure(api_key=test_key)
-            genai.GenerativeModel(MODEL_NAME).generate_content("hi") 
+            genai.Client(api_key=test_key).models.generate_content(model=MODEL_NAME, contents="hi")
             config["api_key"] = test_key
             save_config(config)
             set_api.value = test_key 
@@ -625,22 +625,21 @@ def main(page: ft.Page):
                 src_filename = item['data'].get('_source_filename')
                 src_path = os.path.join(WORKSPACE_FOLDERS["SOURCE"], src_filename)
                 
-                genai.configure(api_key=config.get("api_key"))
-                model = genai.GenerativeModel(MODEL_NAME)
-                
-                old_data_copy = copy.deepcopy(item['data']) 
+                client = genai.Client(api_key=config.get("api_key"))
+
+                old_data_copy = copy.deepcopy(item['data'])
                 current_json_str = json.dumps(item['data'], ensure_ascii=False)
-                
+
                 fix_prompt = config.get("prompt_autofix", DEFAULT_PROMPTS["prompt_autofix"]).replace("{current_json_str}", current_json_str).replace("{qa_report_text}", qa_report_text)
-                
+
                 md_text.value += f"🧠 `[3/5]` Sending instructions to Gemini API (this may take a few seconds)...\n"; page.update()
-                
+
                 if src_path.lower().endswith('.docx'):
-                    response = model.generate_content([fix_prompt, extract_text_from_docx(src_path)])
+                    response = client.models.generate_content(model=MODEL_NAME, contents=[fix_prompt, extract_text_from_docx(src_path)])
                 else:
-                    sample = genai.upload_file(path=src_path, mime_type='application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg')
-                    while sample.state.name == "PROCESSING": time.sleep(1); sample = genai.get_file(sample.name)
-                    response = model.generate_content([sample, fix_prompt])
+                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type='application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'))
+                    while sample.state.name == "PROCESSING": time.sleep(1); sample = client.files.get(name=sample.name)
+                    response = client.models.generate_content(model=MODEL_NAME, contents=[sample, fix_prompt])
                 
                 md_text.value += f"📥 `[4/5]` Response received. Validating JSON schema...\n"; page.update()
                 
@@ -721,18 +720,17 @@ def main(page: ft.Page):
         if not has_cache:
             def _run_audit():
                 try:
-                    genai.configure(api_key=config.get("api_key"))
-                    model = genai.GenerativeModel(MODEL_NAME)
+                    client = genai.Client(api_key=config.get("api_key"))
                     clean_data = copy.deepcopy(item['data'])
                     for k in ['match_analysis', '_source_filename', '_source_hash', 'import_date', 'qa_audit']: clean_data.pop(k, None)
                     prompt = config.get("prompt_qa", DEFAULT_PROMPTS["prompt_qa"]).replace("{json_str}", json.dumps(clean_data, ensure_ascii=False))
 
                     log_msg(f"   🔬 [QA Audit] Sending {src_filename} and JSON for cross-check...", "blue")
-                    if src_path.lower().endswith('.docx'): resp_qa = model.generate_content([prompt, extract_text_from_docx(src_path)])
+                    if src_path.lower().endswith('.docx'): resp_qa = client.models.generate_content(model=MODEL_NAME, contents=[prompt, extract_text_from_docx(src_path)])
                     else:
-                        sample = genai.upload_file(path=src_path, mime_type='application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg')
-                        while sample.state.name == "PROCESSING": time.sleep(1); sample = genai.get_file(sample.name)
-                        resp_qa = model.generate_content([sample, prompt])
+                        sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type='application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'))
+                        while sample.state.name == "PROCESSING": time.sleep(1); sample = client.files.get(name=sample.name)
+                        resp_qa = client.models.generate_content(model=MODEL_NAME, contents=[sample, prompt])
 
                     audit_result_text.value = resp_qa.text
                     match = re.search(r'```json\s*(\{.*?\})\s*```', resp_qa.text, re.DOTALL) or re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', resp_qa.text)
@@ -830,7 +828,7 @@ def main(page: ft.Page):
             
             prompt = config.get("prompt_github", DEFAULT_PROMPTS["prompt_github"]).replace("{prompt_schema_only}", CV_JSON_SCHEMA).replace("{gh_full_data}", json.dumps({"user": user_data, "recent_repos": repos_data or []}, ensure_ascii=False))
             
-            genai.configure(api_key=config.get("api_key")); resp = genai.GenerativeModel(MODEL_NAME).generate_content(prompt)
+            resp = genai.Client(api_key=config.get("api_key")).models.generate_content(model=MODEL_NAME, contents=prompt)
             
             i_tok = getattr(resp.usage_metadata, 'prompt_token_count', 0); o_tok = getattr(resp.usage_metadata, 'candidates_token_count', 0)
             cost = (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT); update_billing(i_tok, o_tok, cost)
