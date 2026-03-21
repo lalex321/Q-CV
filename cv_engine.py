@@ -1396,6 +1396,8 @@ def generate_docx_from_json(data, output_path, cfg):
         context["summary"]["bullet_points"] = [x.strip() for x in items if isinstance(x, str) and x.strip()]
 
     # If still no bullets, derive from objective (best-effort)
+    # Only when objective is the sole source of content — clear it afterwards to avoid
+    # the template rendering both objective and summary with identical text.
     if not context["summary"].get("bullet_points"):
         obj = (context.get("basics") or {}).get("objective")
         if isinstance(obj, str) and obj.strip():
@@ -1403,6 +1405,7 @@ def generate_docx_from_json(data, output_path, cfg):
             bullets = [p.strip() for p in parts if p.strip()]
             # limit to 7
             context["summary"]["bullet_points"] = bullets[:7]
+            context["basics"]["objective"] = ""
 
 
     # Build other_sections for any non-required content (goes to the end of CV under its own headings)
@@ -1461,6 +1464,13 @@ def generate_docx_from_json(data, output_path, cfg):
     lang_lines = _as_lines(context.get("languages"))
     if lang_lines:
         other_sections.append({"title": "Languages", "items": lang_lines})
+        # Remove "Languages" key from skills dict to prevent double rendering
+        # (once under Technical Skills, once in the dedicated Languages section).
+        skills = context.get("skills")
+        if isinstance(skills, dict):
+            keys_to_remove = [k for k in skills if k.strip().lower() == "languages"]
+            for k in keys_to_remove:
+                del skills[k]
 
 #===========================================================================            
 

@@ -441,7 +441,9 @@ def run_batch_autofix_task(items, config, folders, task_state, db_files, cbs):
                     source_for_gemini = extract_text_from_docx(src_path)
                 else:
                     mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
-                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime))
+                    import unicodedata as _ud
+                    _safe_name = _ud.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
+                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
                     while sample.state.name == "PROCESSING":
                         if task_state.get("cancel"): break
                         time.sleep(1)
@@ -690,7 +692,9 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                 resp_qa = _retry_generate(client, MODEL_NAME, [prompt_audit, text_doc])
                             else:
                                 mime = 'application/pdf' if path.lower().endswith('.pdf') else 'image/jpeg'
-                                sample = client.files.upload(file=path, config=genai_types.UploadFileConfig(mime_type=mime))
+                                import unicodedata as _ud
+                                _safe_name = _ud.normalize('NFKD', os.path.basename(path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
+                                sample = client.files.upload(file=path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
                                 while sample.state.name == "PROCESSING":
                                     if task_state.get("cancel"): break
                                     time.sleep(1)
@@ -996,7 +1000,9 @@ def run_batch_qa_task(valid_candidates, sample_count, config, folders, task_stat
                         resp_qa = _retry_generate(client, MODEL_NAME, [prompt, extract_text_from_docx(src_path)])
                     else:
                         mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
-                        sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime))
+                        import unicodedata as _ud
+                        _safe_name = _ud.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
+                        sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
                         while sample.state.name == "PROCESSING":
                             if task_state.get("cancel"):
                                 break
