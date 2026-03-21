@@ -1,10 +1,11 @@
-Q-CV 03.48
+Q-CV 03.49
 
 Summary:
 Current stable snapshot for internal testing. The following working files are included in the project:
-- main_03_48.py
+- main_03_49.py
 - cv_engine.py
 - ai_tasks.py
+- source_baseline_extractor.py
 - quantori_classic.docx
 
 What is captured in 03.48:
@@ -21,7 +22,14 @@ What is captured in 03.48:
   main / cv_engine / ai_tasks.
 - This version is intended for testing by colleagues on macOS and Windows.
 
+What is new in 03.49:
+- Added source_baseline_extractor.py (ported from webQCV): structured section-aware DOCX parsing
+  with labeled sections (contact info, summary, skills, experience, education, etc.) for better LLM extraction.
+  Falls back to plain text extraction if structured parsing fails.
+- Fixed ALLCAPS normalization in current_title: titles fully in uppercase are now converted to title case
+  (e.g. "SENIOR SOFTWARE ENGINEER" → "Senior Software Engineer").
+
 Important:
 - Source of truth for this version — the files included in the project.
 - For further edits, save new snapshots using the scheme filename_0X_XX + comment 0X_XX.txt.
-- The old product doc is partially outdated and does not fully reflect the current state of 03.48.
+- The old product doc is partially outdated and does not fully reflect the current state of 03.49.
