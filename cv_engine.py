@@ -60,6 +60,8 @@ def _extract_location_line(raw_text: str) -> str:
 
 def _trim_strings_deep(value):
     """Recursively trim whitespace around strings before rendering/saving."""
+    if value is None:
+        return ""
     if isinstance(value, str):
         return value.strip()
     if isinstance(value, list):
@@ -911,6 +913,21 @@ def sanitize_json(data):
         c_val = job.get('company_name')
         job['company_name'] = "" if (isinstance(c_val, str) and c_val.lower().strip() in bad_values) else (c_val if isinstance(c_val, str) else "")
 
+    # Deduplicate experience entries by (company_name, role, start_date)
+    seen_exp = set()
+    clean_exp = []
+    for job in data['experience']:
+        key = (
+            str(job.get('company_name', '')).strip().lower(),
+            str(job.get('role', '')).strip().lower(),
+            str((job.get('dates') or {}).get('start', '')).strip().lower(),
+        )
+        if key in seen_exp:
+            continue
+        seen_exp.add(key)
+        clean_exp.append(job)
+    data['experience'] = clean_exp
+
     if not isinstance(data.get('projects'), list): data['projects'] = []
     clean_projects = []
     for p in data['projects']:
@@ -932,7 +949,24 @@ def sanitize_json(data):
         for edu in data['education']:
             for e_key in ['institution', 'degree', 'year', 'details']:
                 val = edu.get(e_key)
-                if isinstance(val, str) and val.lower().strip() in bad_values: edu[e_key] = ""
+                if val is None:
+                    edu[e_key] = ""
+                elif isinstance(val, str) and val.lower().strip() in bad_values:
+                    edu[e_key] = ""
+        # Deduplicate education entries by (institution, degree, year)
+        seen_edu = set()
+        clean_edu = []
+        for edu in data['education']:
+            key = (
+                str(edu.get('institution', '')).strip().lower(),
+                str(edu.get('degree', '')).strip().lower(),
+                str(edu.get('year', '')).strip().lower(),
+            )
+            if key in seen_edu:
+                continue
+            seen_edu.add(key)
+            clean_edu.append(edu)
+        data['education'] = clean_edu
 
     if 'volunteering' not in data or not isinstance(data['volunteering'], list): data['volunteering'] = []
     for v in data['volunteering']:
@@ -1279,7 +1313,9 @@ def process_file_gemini(file_path, api_key, custom_instructions, task_state=None
         response = _retry_generate(client, MODEL_NAME, [final_prompt, text])
     else:
         mime = 'application/pdf' if file_path.lower().endswith('.pdf') else 'image/jpeg'
-        sample = client.files.upload(file=file_path, config=genai_types.UploadFileConfig(mime_type=mime))
+        import unicodedata as _ud
+        _safe_name = _ud.normalize('NFKD', os.path.basename(file_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
+        sample = client.files.upload(file=file_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
         while sample.state.name == "PROCESSING":
             if task_state and task_state.get("cancel"): return None, 0, 0, 0.0
             time.sleep(1)
