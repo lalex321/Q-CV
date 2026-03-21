@@ -19,8 +19,10 @@ A desktop application for converting CVs from PDF, DOCX, or image formats into s
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install flet google-genai python-docx docxtpl pypdf pillow
+pip install -r requirements.txt
 ```
+
+> **Note:** Flet is pinned to `0.23.2`. Versions 0.80+ have breaking API changes incompatible with this codebase.
 
 A Gemini API key is required. On first launch the app will prompt for it, or create `~/.quantoricv_settings.json` manually:
 
@@ -33,8 +35,11 @@ A Gemini API key is required. On first launch the app will prompt for it, or cre
 ## Running
 
 ```bash
+source venv/bin/activate
 python3 main_03_49.py
 ```
+
+The app opens a desktop window. On first run it will ask for your Gemini API key and create the workspace directory at `~/Documents/Quantori_CV_Workplace/`.
 
 ## Building (macOS)
 
