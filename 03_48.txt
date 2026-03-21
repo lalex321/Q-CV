@@ -1,27 +1,27 @@
 Q-CV 03.48
 
-Кратко:
-Текущий стабильный срез для внутреннего тестирования. В проект положены актуальные рабочие файлы:
+Summary:
+Current stable snapshot for internal testing. The following working files are included in the project:
 - main_03_48.py
 - cv_engine_03_48.py
 - ai_tasks_03_48.py
 - quantori_classic.docx
 
-Что зафиксировано в 03.48:
-- Базовый шаблон CV приведён к текущему формату Quantori.
-- Порядок core sections соответствует regulations:
+What is captured in 03.48:
+- Base CV template aligned with the current Quantori format.
+- Core sections order follows regulations:
   Basics → Summary → Technical Skills → Certifications → Work Experience → Education → Languages.
-- Non-core контент должен идти через other_sections.
-- Languages рассматривается как отдельная core section.
-- Используется актуальный шаблон quantori_classic.docx из проекта.
-- Короткий master prompt принят как рабочий baseline вместо старого длинного варианта.
-- First-run defaults приведены к текущему пользовательскому сценарию:
-  Auto-QA (Audit Only), Generate DOCX = ON, Light theme, основные anonymization flags = ON.
-- GitHub import и обычный CV import продолжают дорабатываться на базе этой версии, без смены общей архитектуры tri-file:
+- Non-core content should go through other_sections.
+- Languages is treated as a separate core section.
+- The current quantori_classic.docx template from the project is used.
+- Short master prompt adopted as the working baseline replacing the old long version.
+- First-run defaults aligned with the current user scenario:
+  Auto-QA (Audit Only), Generate DOCX = ON, Light theme, main anonymization flags = ON.
+- GitHub import and regular CV import continue to be developed on top of this version, without changing the overall tri-file architecture:
   main / cv_engine / ai_tasks.
-- Версия предназначена для тестирования коллегами на macOS и Windows.
+- This version is intended for testing by colleagues on macOS and Windows.
 
-Важно:
-- Source of truth для этой версии — файлы, положенные в проект.
-- При дальнейших правках сохранять новые снапшоты по схеме filename_0X_XX + комментарий 0X_XX.txt.
-- Старый product doc местами устарел и не полностью отражает текущее состояние 03.48.
+Important:
+- Source of truth for this version — the files included in the project.
+- For further edits, save new snapshots using the scheme filename_0X_XX + comment 0X_XX.txt.
+- The old product doc is partially outdated and does not fully reflect the current state of 03.48.

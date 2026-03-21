@@ -633,7 +633,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                     total_cost = base_cost
                     cbs['billing'](in_tok, out_tok, base_cost)
 
-                    # --- 🟢 АВТО-ДЕТЕКТОР LINKEDIN ---
+                    # --- 🟢 AUTO-DETECTOR LINKEDIN ---
                     links_dump = json.dumps(data.get('basics', {}).get('links', [])).lower()
                     if "linkedin.com" in links_dump or "linkedin" in filename.lower() or filename.lower().startswith("profile"):
                         data['_comment'] = "Source: LinkedIn"
@@ -910,7 +910,7 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
             cbs['log'](f"✅ Saved: {fname} (Analysis Cost: ${session_cost:.4f})", "green")
             cbs['snack']("AI Analysis complete!", "Open Reports", folders["REPORTS"])
             
-            # Передаем результаты в UI для таблицы
+            # Pass results to UI for table rendering
             on_complete_cb(parsed_all, cands)
             
         except Exception as ex: 
@@ -1160,7 +1160,7 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
 # ==========================================
 def gh_api_request(endpoint, token, cbs):
     try:
-        # ЗАЩИТА ОТ МАРКДАУНА (Разрываем строку)
+        # MARKDOWN GUARD (break the string)
         base_gh_url = "https" + "://" + "api.github.com"
         req = urllib.request.Request(f"{base_gh_url}{endpoint}")
         req.add_header("Authorization", f"Bearer {token}")
@@ -1234,7 +1234,7 @@ def run_mine_github_task(keywords, location, min_stars, config, task_state, cbs,
             bio = user_profile.get('bio') or "No bio provided."
             html_url = user_profile.get('html_url')
             
-            # Передаем данные в UI для отрисовки карточки
+            # Pass data to UI for card rendering
             on_card_generated(login, name, user_loc, company, email, bio, meta, html_url)
             
         cbs['log'](f"✅ Mining complete! Found {found_count} matching candidates.", "green")
@@ -1265,7 +1265,7 @@ def run_xray_task(user_input, config, cbs, on_card_generated):
             platform_name = q.get('platform', 'Search')
             desc = q.get('description', '')
             query_str = q.get('query', '')
-            # Передаем в UI для отрисовки карточки
+            # Pass to UI for card rendering
             on_card_generated(platform_name, desc, query_str)
         
         cbs['log'](f"Generated {len(queries)} X-Ray queries (Cost: ${cost:.4f})", "blue")

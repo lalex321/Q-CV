@@ -128,7 +128,7 @@ fix_docx_path_bug()
 MODEL_NAME = 'gemini-2.0-flash'
 APP_VERSION = "03.49"
 
-# 💸 ПРАЙС-ЛИСТ GEMINI 2.0 FLASH (За 1 Миллион Токенов)
+# 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
 PRICE_1M_IN = 0.15
 PRICE_1M_OUT = 0.60
 
@@ -154,7 +154,7 @@ MASTER_PROMPTS_FILE = os.path.join(USER_HOME, '.master_prompts.json')
 # 2. PROMPTS & SCHEMAS (PROMPT LAB FOUNDATION)
 # ==========================================
 
-# 🛡️ PROTECTED SCHEMA: Никогда не отдается пользователю на редактирование
+# 🛡️ PROTECTED SCHEMA: Never exposed to the user for editing
 CV_JSON_SCHEMA = """{
   "basics": {
     "name": "String", "current_title": "String", "objective": "String",
@@ -175,7 +175,7 @@ CV_JSON_SCHEMA = """{
   "other_sections": [{"title": "String", "items": ["String"]}]
 }"""
 
-# 🧠 MUTABLE PROMPTS: Доступны для редактирования в интерфейсе
+# 🧠 MUTABLE PROMPTS: Available for editing in the UI
 DEFAULT_PROMPTS = {
     "prompt_master_inst": """You are a STRICT Lossless CV Extractor and Translator. Your ONLY job is to digitize this CV into JSON matching the required schema with minimal data loss.
 
@@ -314,7 +314,7 @@ DEFAULT_CONFIG = {
     "last_qa_sample_size": "All available", "qa_compare_mode": "full_pipeline", "last_miner_keywords": "", "last_miner_location": "", "last_miner_stars": "100",
     "total_in_tokens": 0, "total_out_tokens": 0, "total_spent_usd": 0.0
 }
-# Сливаем дефолтные промпты в основной конфиг
+# Merge default prompts into the main config
 DEFAULT_CONFIG.update(DEFAULT_PROMPTS)
 
 def _initial_master_prompts_registry():
@@ -1246,7 +1246,7 @@ def extract_text_from_docx(docx_path: str) -> str:
 # 4. LLM PROCESSING CORE
 # ==========================================
 def process_file_gemini(file_path, api_key, custom_instructions, task_state=None): 
-    # 🧠 Склеиваем редактируемые инструкции и защищенную схему
+    # 🧠 Concatenate editable instructions and the protected schema
     final_prompt = custom_instructions + f"\n\n**JSON SCHEMA:**\n{CV_JSON_SCHEMA}"
     
     client = genai.Client(api_key=api_key)
@@ -1479,7 +1479,7 @@ def smart_anonymize_data(data, api_key, cfg):
         if all_companies:
             unique_comps = list(set(all_companies))
             
-            # Используем редактируемый промпт из конфига
+            # Use editable prompt from config
             prompt_template = cfg.get("prompt_anonymize", DEFAULT_PROMPTS["prompt_anonymize"])
             prompt = prompt_template.replace("{companies_json}", json.dumps(unique_comps, ensure_ascii=False))
             

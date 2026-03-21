@@ -367,7 +367,7 @@ def main(page: ft.Page):
         page.run_task(lambda: show_snack("API Key Error! Please enter a valid key."))
         page.run_task(lambda: require_api_key())
 
-    # 🔗 ИНТЕРФЕЙС ДЛЯ СВЯЗИ С ai_tasks.py
+    # 🔗 INTERFACE FOR COMMUNICATION WITH ai_tasks.py
     cbs = {
         'log': log_msg,
         'progress': set_global_progress,
@@ -749,7 +749,7 @@ def main(page: ft.Page):
             threading.Thread(target=_run_audit, daemon=True).start()
 
     # ==========================================
-    # ТАБЫ: ИНТЕРФЕЙС И ЛОГИКА
+    # TABS: INTERFACE AND LOGIC
     # ==========================================
     def format_tooltip(text): return textwrap.fill(str(text), width=80) if text else ""
 
@@ -763,7 +763,7 @@ def main(page: ft.Page):
     btn_generate_xray = ft.ElevatedButton("Generate X-Ray Queries", icon="auto_awesome", bgcolor="#2196F3", color="white")
 
     def on_xray_card_generated(platform_name, desc, query_str):
-        # BASE64 БРОНЯ
+        # BASE64 ARMOR
         google_base = base64.b64decode("aHR0cHM6Ly93d3cuZ29vZ2xlLmNvbS9zZWFyY2g/cT0=").decode('utf-8')
         google_url = f"{google_base}{urllib.parse.quote(query_str)}"
         card = ft.Card(content=ft.Container(padding=15, content=ft.Column([
@@ -851,7 +851,7 @@ def main(page: ft.Page):
 
     def on_gh_card_generated(login, name, user_loc, company, email, bio, meta, html_url):
         btn_import_gh = ft.ElevatedButton("Analyze & Import", icon="download", color="white", bgcolor="green", height=30, on_click=lambda e: threading.Thread(target=_import_single_github, args=(login, e.control), daemon=True).start())
-        # BASE64 БРОНЯ ДЛЯ LINKEDIN
+        # BASE64 ARMOR FOR LINKEDIN
         li_base = base64.b64decode("aHR0cHM6Ly93d3cubGlua2VkaW4uY29tL3NlYXJjaC9yZXN1bHRzL3Blb3BsZS8/a2V5d29yZHM9").decode('utf-8')
         li_url = f"{li_base}{urllib.parse.quote(name)}"
         
@@ -989,7 +989,7 @@ def main(page: ft.Page):
             role = _cv_get_role(item)
             d_str = time.strftime('%d %b %y', time.localtime(item['ts']))
             
-            # --- ФАБРИКИ (БЕЗОПАСНЫЕ КЛИКИ) ---
+            # --- FACTORIES (SAFE CLICK HANDLERS) ---
             def create_dt_handler(item_ref): return lambda e: preview_single_cv(item_ref)
             def create_src_handler(item_ref): return lambda e: open_original_file(item_ref)
             def create_audit_handler(item_ref): return lambda e: act_cross_check(item_ref)
@@ -1066,7 +1066,7 @@ def main(page: ft.Page):
 
             com_cont.content = ft.GestureDetector(on_double_tap=create_edit_com(item, com_val, com_cont), content=ft.Container(content=ft.Text(com_val, size=12, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS), height=30, alignment=ft.alignment.center_left, tooltip="Double-click to edit comment"))
             
-            # --- ВОССТАНОВЛЕНИЕ ТУЛТИПОВ ---
+            # --- TOOLTIP RESTORE ---
             tt_default = s_prefix + "Double-click to preview DOCX"
             orig_role = item['data'].get('basics', {}).get('current_title_original', '')
             tt_role = s_prefix + textwrap.fill(orig_role if orig_role else role, width=50)
@@ -1173,7 +1173,7 @@ def main(page: ft.Page):
                 num_score = safe_int(score_val)
                 score_color = "green" if num_score >= 70 else ("orange" if num_score >= 40 else "red")
                 
-                # --- ФАБРИКА ДЛЯ PREVIEW В МАТЧЕРЕ ---
+                # --- FACTORY FOR PREVIEW IN MATCHER ---
                 def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
                 dt_handler = create_preview_handler(p.get('Filename', ''))
                 
@@ -1198,7 +1198,7 @@ def main(page: ft.Page):
             except: c_idx = -1
             fname_orig = cands[c_idx]['file'] if (0 <= c_idx < len(cands)) else "Unknown"
             
-            # --- ФАБРИКА ДЛЯ PREVIEW В МАТЧЕРЕ ---
+            # --- FACTORY FOR PREVIEW IN MATCHER ---
             def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
             dt_handler = create_preview_handler(fname_orig)
             
