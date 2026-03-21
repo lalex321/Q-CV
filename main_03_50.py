@@ -56,10 +56,8 @@ def _qa_mode_slug(mode: str) -> str:
 
 
 def _reports_dir(config: dict, workspace_folders: dict) -> Path:
-    workspace_path = config.get("workspace_path") or DEFAULT_WORKSPACE
-    parent = Path(workspace_path).expanduser().parent
-    preferred = parent / "reports"
-    fallback = Path(workspace_folders.get("REPORTS", str(preferred))).expanduser()
+    fallback = Path(workspace_folders.get("REPORTS", "")).expanduser()
+    preferred = Path(config.get("workspace_path") or DEFAULT_WORKSPACE).expanduser() / "reports"
     reports = preferred if preferred.parent.exists() else fallback
     reports.mkdir(parents=True, exist_ok=True)
     return reports
@@ -70,8 +68,8 @@ def _qa_rows_to_csv_rows(rows: list, mode: str) -> tuple[list[str], list[list[st
         headers = ["Input File", "In→JSON", "JSON→DOCX", "Total", "Comments"]
         data = [[
             str(r.get("input_file", "")),
-            "" if r.get("input_json_quality") is None else str(r.get("input_json_quality")),
-            "" if r.get("json_docx_quality") is None else str(r.get("json_docx_quality")),
+            "" if r.get("input_json") is None else str(r.get("input_json")),
+            "" if r.get("json_docx") is None else str(r.get("json_docx")),
             "" if r.get("total_quality") is None else str(r.get("total_quality")),
             str(r.get("comments", "")),
         ] for r in rows]
@@ -103,7 +101,7 @@ def _save_qa_reports(payload: dict, config: dict, workspace_folders: dict) -> di
     # lightweight stats
     numeric_scores = []
     for r in rows:
-        for key in ("quality", "input_json_quality", "json_docx_quality", "total_quality"):
+        for key in ("quality", "input_json", "json_docx", "total_quality"):
             v = r.get(key)
             if isinstance(v, (int, float)):
                 numeric_scores.append(float(v))

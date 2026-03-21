@@ -984,75 +984,123 @@ def run_batch_qa_task(valid_candidates, sample_count, config, folders, task_stat
             for k in ['match_analysis', '_source_filename', '_source_hash', 'import_date', 'qa_audit']:
                 clean_data.pop(k, None)
 
-            prompt = config.get("prompt_qa", DEFAULT_PROMPTS["prompt_qa"]).replace("{json_str}", json.dumps(clean_data, ensure_ascii=False))
+            score_ij = None
+            score_jd = None
+            comments = "Completed"
 
-            try:
-                if src_path.lower().endswith('.docx'):
-                    resp_qa = _retry_generate(client, MODEL_NAME, [prompt, extract_text_from_docx(src_path)])
-                else:
-                    mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
-                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime))
-                    while sample.state.name == "PROCESSING":
+            # --- Stage 1: Input → JSON ---
+            if mode in ["input_json", "full_pipeline"]:
+                try:
+                    prompt = config.get("prompt_qa", DEFAULT_PROMPTS["prompt_qa"]).replace("{json_str}", json.dumps(clean_data, ensure_ascii=False))
+                    if src_path.lower().endswith('.docx'):
+                        resp_qa = _retry_generate(client, MODEL_NAME, [prompt, extract_text_from_docx(src_path)])
+                    else:
+                        mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
+                        sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime))
+                        while sample.state.name == "PROCESSING":
+                            if task_state.get("cancel"):
+                                break
+                            time.sleep(1)
+                            sample = client.files.get(name=sample.name)
                         if task_state.get("cancel"):
-                            break
-                        time.sleep(1)
-                        sample = client.files.get(name=sample.name)
-                    if task_state.get("cancel"):
-                        return
-                    resp_qa = _retry_generate(client, MODEL_NAME, [sample, prompt])
+                            return
+                        resp_qa = _retry_generate(client, MODEL_NAME, [sample, prompt])
 
-                i_tok = getattr(resp_qa.usage_metadata, 'prompt_token_count', 0)
-                o_tok = getattr(resp_qa.usage_metadata, 'candidates_token_count', 0)
-                cbs['billing'](i_tok, o_tok, (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT))
+                    i_tok = getattr(resp_qa.usage_metadata, 'prompt_token_count', 0)
+                    o_tok = getattr(resp_qa.usage_metadata, 'candidates_token_count', 0)
+                    cbs['billing'](i_tok, o_tok, (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT))
 
-                res_text = resp_qa.text
-                aggregated_reports.append(f"--- Report for {cand_name} ---\n{res_text}\n")
+                    res_text = resp_qa.text
+                    aggregated_reports.append(f"--- Report for {cand_name} ---\n{res_text}\n")
 
-                qa_result = None
-                match = re.search(r'```json\s*(\{.*?\})\s*```', res_text, re.DOTALL)
-                if not match:
-                    match = re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', res_text)
-                if match:
-                    try:
-                        qa_result = json.loads(match.group(1))
-                        update_qa_audit_lossless(cand['item']['data'], qa_result)
-                        with open(os.path.join(folders["JSON"], cand['item']['file']), 'w', encoding='utf-8') as f:
-                            json.dump(cand['item']['data'], f, indent=2, ensure_ascii=False)
-                    except Exception:
-                        cbs['log'](f"Failed to parse JSON score for {cand_name}", "orange")
+                    qa_result = None
+                    match = re.search(r'```json\s*(\{.*?\})\s*```', res_text, re.DOTALL)
+                    if not match:
+                        match = re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', res_text)
+                    if match:
+                        try:
+                            qa_result = json.loads(match.group(1))
+                            update_qa_audit_lossless(cand['item']['data'], qa_result)
+                            with open(os.path.join(folders["JSON"], cand['item']['file']), 'w', encoding='utf-8') as f:
+                                json.dump(cand['item']['data'], f, indent=2, ensure_ascii=False)
+                        except Exception:
+                            cbs['log'](f"Failed to parse JSON score for {cand_name}", "orange")
 
-                score = None
-                comments = "Completed"
-                if isinstance(qa_result, dict):
-                    score = qa_result.get('score')
-                    comments = summarize_comments(qa_result)
+                    if isinstance(qa_result, dict):
+                        score_ij = qa_result.get('score')
+                        comments = summarize_comments(qa_result)
 
-                final_row = {
-                    "input_file": display_file,
-                    "quality": score,
-                    "input_json": score if mode == "full_pipeline" else None,
-                    "json_docx": None,
-                    "total_quality": score if mode == "full_pipeline" else None,
-                    "comments": comments,
-                }
-                rows.append(final_row)
-                emit_row(final_row)
+                except Exception as ex:
+                    cbs['log'](f"   ❌ Stage 1 (In→JSON) failed for {cand_name}: {ex}", "red")
+                    comments = f"Stage 1 error: {ex}"
 
-                cbs['log'](f"   🔬 Audited: {cand_name}", "blue")
-                cbs['render']()
+            # --- Stage 2: JSON → DOCX ---
+            if mode in ["json_docx", "full_pipeline"]:
+                try:
+                    docx_name = get_target_filename(cand['item'], config, ".docx")
+                    docx_path = os.path.join(folders["OUTPUT"], docx_name)
+                    if os.path.exists(docx_path):
+                        docx_text = extract_text_from_docx(docx_path)
+                        prompt_jd = config.get("prompt_qa_docx", DEFAULT_PROMPTS["prompt_qa_docx"]).replace("{json_str}", json.dumps(clean_data, ensure_ascii=False))
+                        resp_jd = _retry_generate(client, MODEL_NAME, [prompt_jd, docx_text])
 
-            except Exception as ex:
-                err_row = {
-                    "input_file": display_file,
-                    "quality": None,
-                    "input_json": None,
-                    "json_docx": None,
-                    "total_quality": None,
-                    "comments": f"Error: {ex}",
-                }
-                rows.append(err_row)
-                emit_row(err_row)
-                cbs['log'](f"   ❌ Audit failed for {cand_name}: {ex}", "red")
+                        i_tok = getattr(resp_jd.usage_metadata, 'prompt_token_count', 0)
+                        o_tok = getattr(resp_jd.usage_metadata, 'candidates_token_count', 0)
+                        cbs['billing'](i_tok, o_tok, (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT))
+
+                        res_text_jd = resp_jd.text
+                        aggregated_reports.append(f"--- DOCX Report for {cand_name} ---\n{res_text_jd}\n")
+
+                        jd_result = None
+                        match_jd = re.search(r'```json\s*(\{.*?\})\s*```', res_text_jd, re.DOTALL)
+                        if not match_jd:
+                            match_jd = re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', res_text_jd)
+                        if match_jd:
+                            try:
+                                jd_result = json.loads(match_jd.group(1))
+                            except Exception:
+                                cbs['log'](f"Failed to parse DOCX QA score for {cand_name}", "orange")
+
+                        if isinstance(jd_result, dict):
+                            score_jd = jd_result.get('score')
+                            jd_comments = summarize_comments(jd_result)
+                            if mode == "json_docx":
+                                comments = jd_comments
+                            elif jd_comments and jd_comments != "Completed":
+                                comments = (comments.rstrip(" |") + " | " + jd_comments).strip(" |")
+                    else:
+                        cbs['log'](f"   ⚠️ DOCX not found for {cand_name}: {docx_name}", "orange")
+                        if mode == "json_docx":
+                            comments = "DOCX not found — generate DOCX first"
+
+                except Exception as ex:
+                    cbs['log'](f"   ❌ Stage 2 (JSON→DOCX) failed for {cand_name}: {ex}", "red")
+                    if mode == "json_docx":
+                        comments = f"Stage 2 error: {ex}"
+
+            # Build final row
+            scores_available = [s for s in [score_ij, score_jd] if s is not None]
+            total_quality = int(round(sum(scores_available) / len(scores_available))) if scores_available else None
+            if mode == "input_json":
+                quality = score_ij
+            elif mode == "json_docx":
+                quality = score_jd
+            else:
+                quality = total_quality
+
+            final_row = {
+                "input_file": display_file,
+                "quality": quality,
+                "input_json": score_ij if mode == "full_pipeline" else None,
+                "json_docx": score_jd if mode in ["json_docx", "full_pipeline"] else None,
+                "total_quality": total_quality if mode == "full_pipeline" else None,
+                "comments": comments,
+            }
+            rows.append(final_row)
+            emit_row(final_row)
+
+            cbs['log'](f"   🔬 Audited: {cand_name}", "blue")
+            cbs['render']()
 
         if task_state.get("cancel") or not aggregated_reports:
             return

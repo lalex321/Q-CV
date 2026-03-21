@@ -126,7 +126,7 @@ fix_docx_path_bug()
 # ==========================================
 
 MODEL_NAME = 'gemini-2.0-flash'
-APP_VERSION = "03.49"
+APP_VERSION = "03.50"
 
 # 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
 PRICE_1M_IN = 0.15
@@ -213,6 +213,23 @@ TASK: Find ONLY real data losses or hallucinations.
 You MUST end your response with a JSON block in this EXACT format:
 ```json
 {"score": 95, "missing": ["Skill 1", "Missing Date"], "hallucinations": ["Fake Certification"]}
+```
+If perfect, reply with score 100 and empty arrays.""",
+
+    "prompt_qa_docx": """Act as a strict QA Auditor. Verify that the generated DOCX document faithfully represents the structured CV JSON.
+NOTE: DOCX templates impose fixed formatting and section order — do NOT report layout or ordering differences as issues.
+
+CV JSON:
+{json_str}
+
+TASK: Compare the JSON data against the attached DOCX text. Find ONLY real data losses or distortions:
+- Key fields present in JSON but missing from DOCX (name, title, experience entries, skills, education, etc.)
+- Text truncated or corrupted during rendering
+- Wrong values (e.g. wrong dates, wrong company name) that contradict the JSON
+
+You MUST end your response with a JSON block in this EXACT format:
+```json
+{"score": 95, "missing": ["Field or data absent from DOCX"], "hallucinations": ["Value in DOCX that contradicts JSON"]}
 ```
 If perfect, reply with score 100 and empty arrays.""",
 
