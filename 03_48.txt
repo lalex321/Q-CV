@@ -3,8 +3,8 @@ Q-CV 03.48
 Summary:
 Current stable snapshot for internal testing. The following working files are included in the project:
 - main_03_48.py
-- cv_engine_03_48.py
-- ai_tasks_03_48.py
+- cv_engine.py
+- ai_tasks.py
 - quantori_classic.docx
 
 What is captured in 03.48:
