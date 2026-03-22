@@ -1682,13 +1682,13 @@ def main(page: ft.Page):
             "anon_cut_name", "anon_remove_creds", "anon_mask_companies", "keep_initial_current_title",
             "show_xray_tab", "show_github_tab", "show_matcher_tab", "show_modify_tab", "show_qa_tab",
             "active_template", "json_naming_template", "export_naming_template", "naming_template",
-            "ui_theme", "qa_compare_mode"
+            "ui_theme", "qa_compare_mode", "autofix_threshold"
         ], [
             set_api, set_github_token, set_workspace, set_import_mode, set_generate_docx,
             set_anon_name, set_anon_creds, set_anon_comps, set_keep_initial_title,
             set_show_xray, set_show_github, set_show_matcher, set_show_modify, set_show_qa,
             set_active_template, set_json_naming, set_export_naming, set_naming,
-            set_theme, qa_compare_mode
+            set_theme, qa_compare_mode, set_autofix_threshold
         ]):
             config[k] = ui_c.value
         save_config(config)
@@ -1705,6 +1705,7 @@ def main(page: ft.Page):
     btn_browse = ft.ElevatedButton("Browse...", icon="folder", on_click=lambda _: workspace_picker.get_directory_path())
 
     set_import_mode = ft.RadioGroup(content=ft.Column([ft.Radio(value="none", label="Fast Import (Skip QA)"), ft.Radio(value="qa", label="Auto-QA (Audit Only)"), ft.Radio(value="fix", label="Auto-QA & Auto-Fix")], spacing=5), value=config.get("import_mode", "fix"))
+    set_autofix_threshold = ft.TextField(label="Auto-Fix Threshold", value=str(config.get("autofix_threshold", 90)), width=130, text_size=13, suffix_text="/100", keyboard_type=ft.KeyboardType.NUMBER)
     set_generate_docx = ft.Checkbox(label="Generate DOCX", value=config.get("generate_docx_on_import", False))
     set_keep_initial_title = ft.Switch(label="Preserve original Job Title in DOCX", value=config.get("keep_initial_current_title", False))
     set_anon_name = ft.Switch(label="Cut Last Name", value=config.get("anon_cut_name", True))
@@ -1734,8 +1735,8 @@ def main(page: ft.Page):
         ft.Row([set_workspace, btn_browse]),
         ft.Container(height=10),
         
-        ft.Text("Import & Processing", weight="bold", color="#2196F3"), 
-        ft.Row([set_import_mode, ft.Container(width=20), ft.Container(content=set_generate_docx, padding=ft.padding.only(top=6))], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START),
+        ft.Text("Import & Processing", weight="bold", color="#2196F3"),
+        ft.Row([set_import_mode, ft.Container(width=20), ft.Column([ft.Container(content=set_generate_docx, padding=ft.padding.only(top=6)), set_autofix_threshold], spacing=10)], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START),
         ft.Container(height=10),
         
         ft.Text("Naming Conventions", weight="bold", color="#2196F3"), 
