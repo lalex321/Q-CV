@@ -1052,10 +1052,21 @@ def sanitize_json(data):
             return None
         return {"title": title, "items": items}
 
+    # Titles that duplicate canonical sections — filter them out of other_sections
+    # to prevent double-rendering (e.g. LinkedIn PDFs include Russian section headers)
+    _CANONICAL_TITLES = {
+        "work experience", "experience", "опыт работы", "опыт",
+        "education", "образование",
+        "skills", "technical skills", "навыки", "технические навыки",
+        "languages", "языки",
+        "summary", "profile", "objective", "резюме", "о себе",
+        "certifications", "сертификаты",
+    }
+
     merged_other = []
     for sec in data.get('other_sections', []):
         norm = _normalize_other_section(sec, title_keys=("title", "section_title"))
-        if norm:
+        if norm and norm["title"].strip().lower() not in _CANONICAL_TITLES:
             merged_other.append(norm)
     # Migrate legacy top-level non-core fields into other_sections
     # so other_sections becomes the only canonical non-core bucket.
