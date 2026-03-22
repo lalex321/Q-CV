@@ -1271,7 +1271,7 @@ def _format_docx_sections_for_llm(baseline: dict) -> str:
     """Format structured DOCX sections into labeled text for the LLM."""
     sections = baseline.get("sections", {})
     section_labels = {
-        "preamble": "CANDIDATE HEADER (name, email, location, phone — extract as basics, not as a section)",
+        "preamble": "[CONTACT HEADER: extract name/email/phone/location into basics fields ONLY — do NOT use as current_title, do NOT create a section]",
         "summary": "SUMMARY",
         "skills": "TECHNICAL SKILLS",
         "experience": "WORK EXPERIENCE",
