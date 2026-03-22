@@ -33,6 +33,7 @@ from cv_engine import (
 )
 
 from ai_tasks import *
+from ai_tasks import _parse_llm_json_payload, _qa_audit_get_latest
 
 
 def normalize_qa_audit(qa_audit):
@@ -606,70 +607,109 @@ def main(page: ft.Page):
     # ==========================================
     def act_auto_fix(item, qa_report_text, dialog_controls):
         if not require_api_key(): return
-        
+
         btn_fix = dialog_controls['btn_fix']
         progress = dialog_controls['progress']
         status = dialog_controls['status']
-        md_text = dialog_controls['md_text'] 
-        
+        md_text = dialog_controls['md_text']
+
         btn_fix.disabled = True; progress.visible = True; status.visible = True
         status.value = "✨ Executing Auto-Fix..."
         md_text.value += "\n\n---\n### 🛠️ Auto-Fix Terminal Log\n"
         page.update()
-        
+
         def _fix_task():
             try:
-                md_text.value += f"⏳ `[1/5]` Creating backup of current JSON...\n"; page.update()
+                md_text.value += "⏳ `[1/6]` Creating backup of current JSON...\n"; page.update()
                 json_path = os.path.join(WORKSPACE_FOLDERS["JSON"], item['file'])
                 shutil.copy2(json_path, json_path.replace('.json', '.bak'))
-                
-                md_text.value += f"⏳ `[2/5]` Loading source document and current JSON...\n"; page.update()
+
+                md_text.value += "⏳ `[2/6]` Loading source document...\n"; page.update()
                 src_filename = item['data'].get('_source_filename')
                 src_path = os.path.join(WORKSPACE_FOLDERS["SOURCE"], src_filename)
-                
+
                 client = genai.Client(api_key=config.get("api_key"))
-
                 old_data_copy = copy.deepcopy(item['data'])
-                current_json_str = json.dumps(item['data'], ensure_ascii=False)
+                base_m = lossless_metrics(item['data'])
+                qa_score_before = _qa_audit_get_latest(item['data'].get('qa_audit', {})).get('score', 0)
 
-                fix_prompt = config.get("prompt_autofix", DEFAULT_PROMPTS["prompt_autofix"]).replace("{current_json_str}", current_json_str).replace("{qa_report_text}", qa_report_text)
-
-                md_text.value += f"🧠 `[3/5]` Sending instructions to Gemini API (this may take a few seconds)...\n"; page.update()
-
-                if src_path.lower().endswith('.docx'):
-                    response = client.models.generate_content(model=MODEL_NAME, contents=[fix_prompt, extract_text_from_docx(src_path)])
+                is_docx = src_path.lower().endswith('.docx')
+                if is_docx:
+                    source_for_gemini = extract_text_from_docx(src_path)
                 else:
-                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type='application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'))
+                    import unicodedata as _ud
+                    _safe_name = _ud.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
+                    mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
+                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
                     while sample.state.name == "PROCESSING": time.sleep(1); sample = client.files.get(name=sample.name)
-                    response = client.models.generate_content(model=MODEL_NAME, contents=[sample, fix_prompt])
-                
-                md_text.value += f"📥 `[4/5]` Response received. Validating JSON schema...\n"; page.update()
-                
-                match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response.text, re.DOTALL)
-                txt = match.group(1) if match else response.text[response.text.find('{'):]
-                
-                fixed_data = sanitize_json(json.JSONDecoder().raw_decode(txt)[0])
-                fixed_data['qa_audit'] = {"score": 100, "missing": [], "hallucinations": [], "status": f"Auto-Fixed on {time.strftime('%Y-%m-%d')}"}
-                
-                with open(json_path, 'w', encoding='utf-8') as f: json.dump(fixed_data, f, indent=2, ensure_ascii=False)
-                item['data'] = fixed_data; item['ts'] = os.path.getmtime(json_path)
-                
+                    source_for_gemini = sample
+
+                fix_prompt = config.get("prompt_autofix", DEFAULT_PROMPTS["prompt_autofix"]).replace("{current_json_str}", json.dumps(item['data'], ensure_ascii=False)).replace("{qa_report_text}", qa_report_text)
+
+                md_text.value += "🧠 `[3/6]` Sending fix instructions to Gemini...\n"; page.update()
+                fix_resp = _retry_generate(client, MODEL_NAME, [fix_prompt, source_for_gemini]) if is_docx else _retry_generate(client, MODEL_NAME, [source_for_gemini, fix_prompt])
+
+                md_text.value += "📥 `[4/6]` Response received. Validating + safe merge...\n"; page.update()
+                res_text = getattr(fix_resp, 'text', '') or ''
+                fixed_data = sanitize_json(_parse_llm_json_payload(res_text))
+
+                safe_data = safe_apply_autofix(item['data'], fixed_data)
+                safe_data = sanitize_json(safe_data)
+
+                new_m = lossless_metrics(safe_data)
+                min_chars = int(base_m["char_count"] * 0.985)
+                min_strs = max(0, base_m["str_count"] - 1)
+                if (new_m["str_count"] < min_strs) or (new_m["char_count"] < min_chars):
+                    md_text.value += f"⚠️ **Lossless gate rejected fix** (strings: {base_m['str_count']} → {new_m['str_count']}, chars: {base_m['char_count']} → {new_m['char_count']}). Original kept.\n"
+                    status.value = "⚠️ Fix rejected (data loss detected)"; status.color = "orange"
+                    return
+
+                md_text.value += "🔬 `[5/6]` Re-QA: verifying fix actually improved quality...\n"; page.update()
+                try:
+                    clean_fixed = copy.deepcopy(safe_data)
+                    for k in ['match_analysis', '_source_filename', '_source_hash', 'import_date', 'qa_audit']:
+                        clean_fixed.pop(k, None)
+                    prompt_reqa = config.get("prompt_qa", DEFAULT_PROMPTS["prompt_qa"]).replace("{json_str}", json.dumps(clean_fixed, ensure_ascii=False))
+                    resp_reqa = _retry_generate(client, MODEL_NAME, [prompt_reqa, source_for_gemini]) if is_docx else _retry_generate(client, MODEL_NAME, [source_for_gemini, prompt_reqa])
+                    m_reqa = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', resp_reqa.text, re.DOTALL)
+                    if not m_reqa: m_reqa = re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', resp_reqa.text)
+                    if m_reqa:
+                        reqa_result = json.loads(m_reqa.group(1))
+                        new_score = reqa_result.get('score', 0)
+                        if new_score > qa_score_before:
+                            update_qa_audit_lossless(safe_data, reqa_result)
+                            md_text.value += f"✅ Score improved: {qa_score_before} → {new_score}/100\n"
+                        else:
+                            md_text.value += f"↩️ **Fix reverted**: re-QA score {new_score} ≤ original {qa_score_before}. Original kept.\n"
+                            status.value = f"↩️ Fix reverted (score didn't improve)"; status.color = "orange"
+                            return
+                    else:
+                        md_text.value += "⚠️ Re-QA parse failed — applying fix anyway.\n"
+                        update_qa_audit_lossless(safe_data, {"score": qa_score_before, "status": f"Auto-Fixed on {time.strftime('%Y-%m-%d')} (re-QA unavailable)"})
+                except Exception as reqa_err:
+                    md_text.value += f"⚠️ Re-QA error ({reqa_err}) — applying fix anyway.\n"
+                    update_qa_audit_lossless(safe_data, {"score": qa_score_before, "status": f"Auto-Fixed on {time.strftime('%Y-%m-%d')} (re-QA failed)"})
+
+                md_text.value += "💾 `[6/6]` Saving...\n"; page.update()
+                with open(json_path, 'w', encoding='utf-8') as f: json.dump(safe_data, f, indent=2, ensure_ascii=False)
+                item['data'] = safe_data; item['ts'] = os.path.getmtime(json_path)
+
                 diff_msgs = []
-                for k in fixed_data:
+                for k in safe_data:
                     if k in ['qa_audit', 'match_analysis', '_source_filename', '_source_hash', 'import_date']: continue
-                    if json.dumps(old_data_copy.get(k), sort_keys=True) != json.dumps(fixed_data.get(k), sort_keys=True):
+                    if json.dumps(old_data_copy.get(k), sort_keys=True) != json.dumps(safe_data.get(k), sort_keys=True):
                         diff_msgs.append(f"- **`{k.capitalize()}`** section was updated.")
                 if not diff_msgs: diff_msgs.append("- Only internal formatting/structure was repaired.")
-                
-                md_text.value += f"✅ `[5/5]` Done!\n\n**What was changed:**\n" + "\n".join(diff_msgs)
+
+                md_text.value += "\n**What was changed:**\n" + "\n".join(diff_msgs)
                 status.value = "✅ Fix complete!"; status.color = "green"; btn_fix.visible = False
-                log_msg(f"✅ JSON Auto-Fixed successfully for {item['data'].get('basics', {}).get('name', 'Candidate')}.", "green")
-                
+                log_msg(f"✅ JSON Auto-Fixed for {item['data'].get('basics', {}).get('name', 'Candidate')}.", "green")
+
             except Exception as e:
-                md_text.value += f"\n❌ **ERROR:** {str(e)}\n"; status.value = f"❌ Fix failed"; status.color = "red"
+                md_text.value += f"\n❌ **ERROR:** {str(e)}\n"; status.value = "❌ Fix failed"; status.color = "red"
             finally:
                 progress.visible = False; render_table(); page.update()
-                
+
         threading.Thread(target=_fix_task, daemon=True).start()
 
     def act_cross_check(item):
