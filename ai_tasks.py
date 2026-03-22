@@ -740,16 +740,48 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                         cbs['log'](f"   ❌ Auto-Fix failed during import: invalid JSON from model. Saved raw response to {bad_path}", 'red')
                                         raise
                                     fixed_data = sanitize_json(fixed_data)
-                                    fixed_data['qa_audit'] = {"score": 100, "missing": [], "hallucinations": [], "status": f"Auto-Fixed on import ({time.strftime('%Y-%m-%d')})"}
-                                    fixed_data['_source_filename'] = new_source_filename
-                                    fixed_data['_source_hash'] = file_hash
-                                    fixed_data['import_date'] = data['import_date']
-                                    
-                                    with open(target_json_path.replace('.json', '.bak'), 'w', encoding='utf-8') as f:
-                                        json.dump(data, f, indent=2, ensure_ascii=False)
-                                    
-                                    data = fixed_data
-                                    cbs['log'](f"   ✨ Auto-Fix applied successfully!", "green")
+
+                                    # Re-QA the fixed data to verify it actually improved
+                                    try:
+                                        cbs['log'](f"   🔬 [Re-QA] Verifying fix quality...", "blue")
+                                        clean_fixed = copy.deepcopy(fixed_data)
+                                        for k in ['match_analysis', '_source_filename', '_source_hash', 'import_date', 'qa_audit']:
+                                            clean_fixed.pop(k, None)
+                                        prompt_reqa = config.get("prompt_qa", DEFAULT_PROMPTS["prompt_qa"]).replace("{json_str}", json.dumps(clean_fixed, ensure_ascii=False))
+                                        resp_reqa = _retry_generate(client, MODEL_NAME, [prompt_reqa, text_doc]) if path.lower().endswith('.docx') else _retry_generate(client, MODEL_NAME, [sample, prompt_reqa])
+                                        i_tok = getattr(resp_reqa.usage_metadata, 'prompt_token_count', 0)
+                                        o_tok = getattr(resp_reqa.usage_metadata, 'candidates_token_count', 0)
+                                        total_cost += (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT)
+                                        cbs['billing'](i_tok, o_tok, (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT))
+                                        reqa_text = resp_reqa.text
+                                        m_reqa = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', reqa_text, re.DOTALL)
+                                        if not m_reqa: m_reqa = re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', reqa_text)
+                                        if m_reqa:
+                                            reqa_result = json.loads(m_reqa.group(1))
+                                            new_score = reqa_result.get('score', 0)
+                                            if new_score > score:
+                                                fixed_data['qa_audit'] = reqa_result
+                                                fixed_data['_source_filename'] = new_source_filename
+                                                fixed_data['_source_hash'] = file_hash
+                                                fixed_data['import_date'] = data['import_date']
+                                                with open(target_json_path.replace('.json', '.bak'), 'w', encoding='utf-8') as f:
+                                                    json.dump(data, f, indent=2, ensure_ascii=False)
+                                                data = fixed_data
+                                                cbs['log'](f"   ✨ Auto-Fix applied: {score} → {new_score}/100", "green")
+                                            else:
+                                                cbs['log'](f"   ↩️ Auto-Fix reverted: fix score {new_score} ≤ original {score}. Keeping original.", "orange")
+                                        else:
+                                            raise ValueError("Re-QA response parse failed")
+                                    except Exception as reqa_err:
+                                        # Re-QA failed — apply fix anyway (conservative fallback)
+                                        fixed_data['qa_audit'] = {"score": score, "missing": [], "hallucinations": [], "status": f"Auto-Fixed on import ({time.strftime('%Y-%m-%d')}), re-QA unavailable"}
+                                        fixed_data['_source_filename'] = new_source_filename
+                                        fixed_data['_source_hash'] = file_hash
+                                        fixed_data['import_date'] = data['import_date']
+                                        with open(target_json_path.replace('.json', '.bak'), 'w', encoding='utf-8') as f:
+                                            json.dump(data, f, indent=2, ensure_ascii=False)
+                                        data = fixed_data
+                                        cbs['log'](f"   ✨ Auto-Fix applied (re-QA unavailable: {reqa_err}).", "green")
                                 elif score < fix_threshold and import_mode == "qa":
                                     cbs['log'](f"   ⚠️ [Auto-QA] Score {score}/100 (below threshold {fix_threshold}). Auto-fix is disabled in settings.", "orange")
                                 elif score < 100:
