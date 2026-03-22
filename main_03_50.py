@@ -275,10 +275,17 @@ def main(page: ft.Page):
     
     page.title = SCRIPT_NAME
     page.theme_mode = ft.ThemeMode.LIGHT if config.get("ui_theme") == "Light" else ft.ThemeMode.DARK
-    page.window_width = 1300
+    page.window_width = config.get("window_width", 1300)
     page.window_min_width = 1200
-    page.window_height = 850
+    page.window_height = config.get("window_height", 850)
     page.padding = 0
+
+    def on_window_event(e):
+        if e.data in ("resize", "resized"):
+            config["window_width"] = page.window_width
+            config["window_height"] = page.window_height
+            save_config(config)
+    page.on_window_event = on_window_event
 
     db_files = []
     current_filtered_items = []     

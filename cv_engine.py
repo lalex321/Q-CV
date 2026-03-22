@@ -61,13 +61,13 @@ def _extract_location_line(raw_text: str) -> str:
 
 def _trim_strings_deep(value):
     """Recursively trim whitespace and XML-escape strings for DOCX rendering.
-    Note: & must be escaped to &amp; because docxtpl does not autoescape Jinja2
-    variables, so raw & in text breaks DOCX XML (truncates content after &).
+    Note: &, < and > must be escaped because docxtpl does not autoescape Jinja2
+    variables, so raw XML-special chars break DOCX XML (truncate content).
     """
     if value is None:
         return ""
     if isinstance(value, str):
-        return value.strip().replace('&', '&amp;')
+        return value.strip().replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     if isinstance(value, list):
         return [_trim_strings_deep(v) for v in value]
     if isinstance(value, dict):
@@ -190,9 +190,9 @@ DEFAULT_PROMPTS = {
 2. **NO INVENTED FACTS / NO DATA LOSS:** Extract only facts supported by the CV, but do not lose explicit information. Preserve meaningful technical terms, methods, tools, technologies, responsibilities, achievements, project details, and bullet points.
 3. **DEEP SCAN THE ENTIRE CV:** Extract from the whole document, including header, summary, skills blocks, Top Skills, experience bullets, project descriptions, certifications, languages, links, and side sections.
 4. **SKILLS & ENVIRONMENT:** Extract explicit skills, tools, technologies, frameworks, platforms, databases, cloud/services, and domain systems from all relevant sections. Put them into `skills` or role `environment` as appropriate. Do not create noisy or redundant generic skill categories.
-5. **DATES & CURRENT STATUS:** Extract all explicit dates from all sections, preserving the highest precision supported by the source (`April 2025`, `2018`, `Present`). Keep explicit durations when present. Never invent dates. Never assign future dates to finished past roles.
+5. **DATES & CURRENT STATUS:** Extract all explicit dates from all sections, preserving the highest precision supported by the source (`April 2025`, `2018`, `Present`). If only a duration is available with no start/end dates (e.g. `6 years 5 months`), place it in `dates.start` and leave `dates.end` empty. Never invent dates. Never assign future dates to finished past roles.
 6. **CONTACTS, LINKS, LOCATIONS:** Extract all explicit phone numbers, emails, LinkedIn, GitHub, portfolio, websites, WhatsApp, and other links, plus the most granular explicit location. Do not infer location from vague context or company headquarters.
-7. **WORK EXPERIENCE INTEGRITY:** Merge all employment history into the single `experience` array, even if the CV splits it into multiple employment sections. Preserve explicit company, role title, dates, location, highlights, responsibilities, achievements, project details, and environment. Do not split one role unless clearly shown. Do not duplicate roles. Do not confuse role title with company name.
+7. **WORK EXPERIENCE INTEGRITY:** Merge all employment history into the single `experience` array, even if the CV splits it into multiple employment sections. Preserve explicit company, role title, dates, location, highlights, responsibilities, achievements, project details, and environment. Do not split one role unless clearly shown. Do not duplicate roles. Do not confuse role title with company name. If a role has only a duration (e.g. `6 years 5 months`) but no start/end dates, put the duration string into `dates.start` and leave `dates.end` as `""`.
 8. **CURRENT TITLE & NAME NORMALIZATION:** Preserve `basics.current_title` as close as possible to the resume header wording. Extract the real display name if explicit; if not, and the email clearly contains a safe `firstname.lastname` pattern, normalize it into a human-readable name. Do not invent beyond that.
 9. **CANONICAL SECTION ROUTING:** Core content must go only into its canonical sections: `basics`, `summary`, `skills`, `experience`, `education`, `certifications`, `languages`. Degrees must go to `education`, certifications to `certifications`, and language items with proficiency/test details to `languages`.
 10. **OTHER_SECTIONS ONLY:** Any remaining non-core content must go only into `other_sections`. Do not create, use, or reference `custom_sections`.
@@ -204,7 +204,7 @@ DEFAULT_PROMPTS = {
 - no unsupported facts were invented
 - no `None` or `null` appears
 - skills from Top Skills / bullets / environment / responsibilities were not missed
-- dates are preserved exactly as supported by the source
+- dates are preserved exactly as supported by the source; duration-only entries (e.g. `6 years 5 months`) are in `dates.start`
 - no core content leaked into `other_sections`
 - all remaining non-core content is preserved in `other_sections`
 """,
@@ -902,8 +902,17 @@ def sanitize_json(data):
             if clean_title.isupper(): clean_title = clean_title.title()
             if len(clean_title) > 100 or len(clean_title) < 2: clean_title = ""
 
+    # If title looks like a location (e.g. "Bay Area/San Diego") rather than a job title, discard it
+    if clean_title and '/' in clean_title:
+        _title_kw = {'engineer', 'manager', 'developer', 'analyst', 'designer', 'architect',
+                     'lead', 'director', 'consultant', 'specialist', 'scientist', 'officer',
+                     'coordinator', 'executive', 'head', 'vp', 'president', 'intern', 'sdet'}
+        if not any(kw in clean_title.lower() for kw in _title_kw):
+            clean_title = ""
+
     if not clean_title and data.get('experience'):
             fb = str(data['experience'][0].get('role', '')).replace('\n', ' ').strip()
+            if fb.isupper(): fb = ' '.join(w if (w.isupper() and len(w) <= 4) else w.capitalize() for w in fb.split())
             if fb: clean_title = fb
             
     data['basics']['current_title'] = clean_title
@@ -931,7 +940,12 @@ def sanitize_json(data):
     for job in data['experience']:
         pd = job.get('project_description')
         if isinstance(pd, list): pd = " ".join(map(str, pd))
-        job['project_description'] = "" if (isinstance(pd, str) and pd.lower().strip() in bad_values) else (pd if isinstance(pd, str) else "")
+        if not isinstance(pd, str): pd = ""
+        pd_stripped = pd.strip()
+        # Discard values that are pure punctuation/whitespace (e.g. ":", "-", "—")
+        if pd_stripped.lower() in bad_values or (pd_stripped and not re.search(r'\w', pd_stripped)):
+            pd_stripped = ""
+        job['project_description'] = pd_stripped
             
         loc = job.get('location')
         job['location'] = "" if (isinstance(loc, str) and loc.lower().strip() in bad_values) else (loc if isinstance(loc, str) else "")
@@ -1033,6 +1047,13 @@ def sanitize_json(data):
     if not isinstance(data.get('other_sections'), list):
         data['other_sections'] = []
 
+    def _is_mojibake(s):
+        """Return True if string looks like UTF-8 bytes misread as Latin-1 (>40% in U+0080-U+00FF)."""
+        if not s:
+            return False
+        extended = sum(1 for c in s if '\x80' <= c <= '\xff')
+        return extended / len(s) > 0.4
+
     def _normalize_other_section(sec, *, title_keys=("title", "section_title")):
         if not isinstance(sec, dict):
             return None
@@ -1044,6 +1065,8 @@ def sanitize_json(data):
             elif raw_title:
                 raw_title = str(raw_title).strip()
             else:
+                raw_title = ""
+            if raw_title and _is_mojibake(raw_title):
                 raw_title = ""
             if raw_title:
                 title = raw_title
