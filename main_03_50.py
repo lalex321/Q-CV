@@ -33,7 +33,7 @@ from cv_engine import (
 )
 
 from ai_tasks import *
-from ai_tasks import _parse_llm_json_payload, _qa_audit_get_latest
+from ai_tasks import _parse_llm_json_payload, _qa_audit_get_latest, _retry_generate
 
 
 def normalize_qa_audit(qa_audit):
