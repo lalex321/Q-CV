@@ -943,8 +943,8 @@ def main(page: ft.Page):
     master_checkbox = ft.Checkbox(value=False, on_change=handle_master_checkbox)
     sort_icons = { i: ft.Icon(size=14, visible=False, color="blue") for i in range(1, 9) }
     
-    def get_header_cell(label, width=None, expand=None, col_idx=None):
-        content = ft.Row([ft.Text(label, size=12, weight="bold")])
+    def get_header_cell(label, width=None, expand=None, col_idx=None, center=False):
+        content = ft.Row([ft.Text(label, size=12, weight="bold")], alignment=ft.MainAxisAlignment.CENTER if center else ft.MainAxisAlignment.START)
         if col_idx: content.controls.append(sort_icons[col_idx])
         c_args = {"content": content, "padding": ft.padding.symmetric(vertical=10)}
         if width: c_args["width"] = width
@@ -1022,7 +1022,7 @@ def main(page: ft.Page):
         if sc_s: h_cells.append(get_header_cell("Score", width=60, col_idx=8))
         if sc_f: h_cells.append(get_header_cell("File", width=200, col_idx=3))
         if sc_com: h_cells.append(get_header_cell("Comments", expand=1, col_idx=6))
-        h_cells.extend([get_header_cell("Date", width=80, col_idx=4), get_header_cell("QA", width=50, col_idx=5), get_header_cell("View", width=80)])
+        h_cells.extend([get_header_cell("Date", width=80, col_idx=4, center=True), get_header_cell("QA", width=50, col_idx=5, center=True), get_header_cell("View", width=80, center=True)])
         header_row.content.controls = h_cells
 
         new_rows = []
