@@ -296,10 +296,9 @@ def main(page: ft.Page):
     
     def cancel_current_task():
         task_state["cancel"] = True
-        btn_global_stop.disabled = True
-        btn_global_stop.text = "Wait..."
-        btn_global_stop.icon = ft.icons.HOURGLASS_EMPTY
-        btn_global_stop.update()
+        btn_global_stop.visible = False
+        stopping_indicator.visible = True
+        page.update()
         log_msg("🛑 Stop requested. Halting tasks...", "orange")
 
     btn_global_stop = ft.ElevatedButton(
@@ -307,13 +306,14 @@ def main(page: ft.Page):
         tooltip="Stop current task", on_click=lambda e: cancel_current_task(),
         visible=False, height=25, style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=10, vertical=0))
     )
+    stopping_indicator = ft.Text("⏳ Stopping...", color="#e5c07b", size=12, visible=False, weight=ft.FontWeight.BOLD)
 
     status_bar = ft.Container(
         bgcolor="#3F4651", height=40, padding=ft.padding.symmetric(horizontal=15),
         content=ft.Row([
             ft.Container(content=ft.Row([global_task_progress_bar, global_task_status_text]), width=400),
             ft.Container(expand=True),
-            ft.Row([btn_global_stop, ft.Container(width=10), ft.Icon("account_balance_wallet", color="white", size=14), billing_status_text])
+            ft.Row([stopping_indicator, btn_global_stop, ft.Container(width=10), ft.Icon("account_balance_wallet", color="white", size=14), billing_status_text])
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
     )
 
@@ -577,10 +577,8 @@ def main(page: ft.Page):
     # ==========================================
     def run_in_background(target_func, *args):
         task_state["cancel"] = False
-        btn_global_stop.disabled = False
         btn_global_stop.visible = True
-        btn_global_stop.text = "Stop"
-        btn_global_stop.icon = ft.icons.CANCEL
+        stopping_indicator.visible = False
         
         btn_import.disabled = True; btn_generate.disabled = True; btn_anonymize.disabled = True
         btn_batch_autofix.disabled = True; btn_delete.disabled = True; btn_analyze.disabled = True
@@ -594,6 +592,8 @@ def main(page: ft.Page):
             finally:
                 btn_global_stop.visible = False
                 task_state["running"] = False
+                btn_global_stop.visible = False
+                stopping_indicator.visible = False
                 btn_import.disabled = False; btn_generate.disabled = False; btn_anonymize.disabled = False
                 btn_batch_autofix.disabled = False; btn_delete.disabled = False; btn_analyze.disabled = False
                 btn_run_modifier.disabled = False; btn_mine.disabled = False; btn_generate_xray.disabled = False
