@@ -841,6 +841,17 @@ def sync_languages_to_skills(data: dict) -> dict:
 _MONTH_NAMES = ["january","february","march","april","may","june",
                 "july","august","september","october","november","december"]
 
+# Titles that duplicate canonical sections — must be filtered from other_sections
+# to prevent double-rendering (LinkedIn PDFs often contain these as extra sections)
+CANONICAL_SECTION_TITLES = {
+    "work experience", "experience", "опыт работы", "опыт",
+    "education", "образование",
+    "skills", "technical skills", "top skills", "навыки", "технические навыки",
+    "languages", "языки",
+    "summary", "profile", "objective", "резюме", "о себе",
+    "certifications", "сертификаты",
+}
+
 def _is_future_date(s):
     """Return True if date string represents a month/year clearly in the future."""
     if not isinstance(s, str): return False
@@ -1052,21 +1063,10 @@ def sanitize_json(data):
             return None
         return {"title": title, "items": items}
 
-    # Titles that duplicate canonical sections — filter them out of other_sections
-    # to prevent double-rendering (e.g. LinkedIn PDFs include Russian section headers)
-    _CANONICAL_TITLES = {
-        "work experience", "experience", "опыт работы", "опыт",
-        "education", "образование",
-        "skills", "technical skills", "навыки", "технические навыки",
-        "languages", "языки",
-        "summary", "profile", "objective", "резюме", "о себе",
-        "certifications", "сертификаты",
-    }
-
     merged_other = []
     for sec in data.get('other_sections', []):
         norm = _normalize_other_section(sec, title_keys=("title", "section_title"))
-        if norm and norm["title"].strip().lower() not in _CANONICAL_TITLES:
+        if norm and norm["title"].strip().lower() not in CANONICAL_SECTION_TITLES:
             merged_other.append(norm)
     # Migrate legacy top-level non-core fields into other_sections
     # so other_sections becomes the only canonical non-core bucket.
@@ -1523,6 +1523,10 @@ def generate_docx_from_json(data, output_path, cfg):
             if not isinstance(sec, dict):
                 continue
             title = str(sec.get("title", "")).strip()
+            # Skip sections that duplicate canonical sections (e.g. LinkedIn "Top Skills",
+            # "Technical Skills" raw blocks, Russian section headers from older imports)
+            if title.lower() in CANONICAL_SECTION_TITLES:
+                continue
             items = sec.get("items", [])
             if not isinstance(items, list):
                 items = [items] if items else []
