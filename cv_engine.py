@@ -8,6 +8,7 @@ import platform
 import subprocess
 import time
 import shutil
+import datetime
 def _extract_contacts_plus(raw_text: str) -> dict:
     """Best-effort extraction of email/phone/website/linkedin from raw text."""
     out = {"email":"", "phone":"", "website":"", "linkedin":""}
@@ -834,7 +835,27 @@ def sync_languages_to_skills(data: dict) -> dict:
 
 
 
-def sanitize_json(data): 
+_MONTH_NAMES = ["january","february","march","april","may","june",
+                "july","august","september","october","november","december"]
+
+def _is_future_date(s):
+    """Return True if date string represents a month/year clearly in the future."""
+    if not isinstance(s, str): return False
+    low = s.strip().lower()
+    if not low or low == 'present': return False
+    m = re.search(r'\b(20\d\d|19\d\d)\b', s)
+    if not m: return False
+    year = int(m.group(1))
+    today = datetime.date.today()
+    if year > today.year: return True
+    if year == today.year:
+        for i, name in enumerate(_MONTH_NAMES):
+            if name in low:
+                return (i + 1) > today.month
+    return False
+
+
+def sanitize_json(data):
     if not isinstance(data, dict): data = {}
     data = _strip_leading_list_markers_deep(data)
     
@@ -886,8 +907,10 @@ def sanitize_json(data):
     if 'skills' not in data or not isinstance(data['skills'], dict): data['skills'] = {}
     clean_skills = {}
     for k, v in data['skills'].items():
-        if isinstance(v, str): clean_skills[k] = [v]
-        elif isinstance(v, list): clean_skills[k] = [str(i) for i in v if i]
+        # Normalize schema-leaked key names: "technical_skills" -> "Technical Skills"
+        clean_k = k.replace('_', ' ').strip().title() if '_' in k else k
+        if isinstance(v, str): clean_skills[clean_k] = [v]
+        elif isinstance(v, list): clean_skills[clean_k] = [str(i) for i in v if i]
     data['skills'] = clean_skills
 
     if not isinstance(data.get('experience'), list): data['experience'] = []
@@ -909,6 +932,10 @@ def sanitize_json(data):
             for d_key in ['start', 'end']:
                 val = job['dates'].get(d_key)
                 job['dates'][d_key] = "" if (isinstance(val, str) and val.lower().strip() in bad_values) else (val if isinstance(val, str) else "")
+            # Future end date → replace with "Present" (LLM hallucination guard)
+            end_val = job['dates'].get('end', '')
+            if _is_future_date(end_val):
+                job['dates']['end'] = 'Present'
         
         c_val = job.get('company_name')
         job['company_name'] = "" if (isinstance(c_val, str) and c_val.lower().strip() in bad_values) else (c_val if isinstance(c_val, str) else "")
