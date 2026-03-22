@@ -290,7 +290,7 @@ def main(page: ft.Page):
     # GLOBAL UI COMPONENTS & CALLBACKS
     # ==========================================
     billing_status_text = ft.Text("", size=12, color="white", weight="bold")
-    global_task_progress_bar = ft.ProgressBar(width=300, value=0, visible=False, color="blue", bgcolor="#5a6373")
+    global_task_progress_bar = ft.ProgressBar(width=300, value=0, visible=False, color="blue", bgcolor="#5a6373", bar_height=8)
     global_task_status_text = ft.Text("", size=12, color="white", visible=False)
     logs_view = ft.ListView(expand=True, spacing=4)
     
