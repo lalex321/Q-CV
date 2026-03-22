@@ -297,6 +297,8 @@ def main(page: ft.Page):
     def cancel_current_task():
         task_state["cancel"] = True
         btn_global_stop.disabled = True
+        btn_global_stop.text = "Wait..."
+        btn_global_stop.icon = ft.icons.HOURGLASS_EMPTY
         log_msg("🛑 Stop requested. Halting tasks...", "orange")
         page.update()
 
@@ -577,6 +579,8 @@ def main(page: ft.Page):
         task_state["cancel"] = False
         btn_global_stop.disabled = False
         btn_global_stop.visible = True
+        btn_global_stop.text = "Stop"
+        btn_global_stop.icon = ft.icons.CANCEL
         
         btn_import.disabled = True; btn_generate.disabled = True; btn_anonymize.disabled = True
         btn_batch_autofix.disabled = True; btn_delete.disabled = True; btn_analyze.disabled = True
