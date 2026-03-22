@@ -717,10 +717,11 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                 score = qa_result.get('score', 100)
                                 update_qa_audit_lossless(data, qa_result)
                                 
-                                if score < 100 and import_mode == "fix":
-                                    cbs['log'](f"   ⚠️ [Auto-QA] Score {score}/100. Running Auto-Fix...", "orange")
+                                fix_threshold = int(config.get("autofix_threshold", 90))
+                                if score < fix_threshold and import_mode == "fix":
+                                    cbs['log'](f"   ⚠️ [Auto-QA] Score {score}/100 (threshold {fix_threshold}). Running Auto-Fix...", "orange")
                                     prompt_fix = config.get("prompt_autofix", DEFAULT_PROMPTS["prompt_autofix"]).replace("{current_json_str}", json.dumps(data, ensure_ascii=False)).replace("{qa_report_text}", qa_text)
-                                    
+
                                     fix_resp = _retry_generate(client, MODEL_NAME, [prompt_fix, text_doc]) if path.lower().endswith('.docx') else _retry_generate(client, MODEL_NAME, [sample, prompt_fix])
 
                                     i_tok = getattr(fix_resp.usage_metadata, 'prompt_token_count', 0)
@@ -749,8 +750,10 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                     
                                     data = fixed_data
                                     cbs['log'](f"   ✨ Auto-Fix applied successfully!", "green")
-                                elif score < 100 and import_mode == "qa":
-                                    cbs['log'](f"   ⚠️ [Auto-QA] Score {score}/100. (Auto-fix is disabled in settings)", "orange")
+                                elif score < fix_threshold and import_mode == "qa":
+                                    cbs['log'](f"   ⚠️ [Auto-QA] Score {score}/100 (below threshold {fix_threshold}). Auto-fix is disabled in settings.", "orange")
+                                elif score < 100:
+                                    cbs['log'](f"   ✅ [Auto-QA] Score {score}/100 (above threshold {fix_threshold}). No fix needed.", "green")
                                 else:
                                     cbs['log'](f"   ✅ [Auto-QA] Perfect extraction (100/100).", "green")
                         except Exception as e:

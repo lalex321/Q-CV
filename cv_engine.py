@@ -331,7 +331,7 @@ DEFAULT_CONFIG = {
     "export_naming_template": "CV_FirstName_LastName.docx",
     "naming_template": "CV FirstName FirstLetter (CV_Alexei_L.docx)",
     "ui_theme": "Light", "last_jd": "", "last_sourcing_query": "", "last_modifier_query": "",
-    "generate_docx_on_import": True,
+    "generate_docx_on_import": True, "autofix_threshold": 90,
     "prompt_master_version": CURRENT_PROMPT_MASTER_VERSION, "active_prompt_version": CURRENT_PROMPT_MASTER_VERSION,
     "prompt_master_user_edited": False, "_prompt_master_upgrade_warning": False,
     "last_qa_sample_size": "All available", "qa_compare_mode": "full_pipeline", "last_miner_keywords": "", "last_miner_location": "", "last_miner_stars": "100",
