@@ -1482,7 +1482,7 @@ def generate_docx_from_json(data, output_path, cfg):
         for it in lang_items:
             if isinstance(it, dict):
                 lang = str(it.get("language") or "").strip()
-                prof = str(it.get("proficiency") or it.get("level") or it.get("details") or "").strip()
+                prof = str(it.get("level") or it.get("proficiency") or it.get("details") or "").strip()
                 if lang and prof:
                     out.append(f"{lang} ({prof})")
                 elif lang:
