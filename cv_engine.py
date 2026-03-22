@@ -60,11 +60,14 @@ def _extract_location_line(raw_text: str) -> str:
 
 
 def _trim_strings_deep(value):
-    """Recursively trim whitespace around strings before rendering/saving."""
+    """Recursively trim whitespace and XML-escape strings for DOCX rendering.
+    Note: & must be escaped to &amp; because docxtpl does not autoescape Jinja2
+    variables, so raw & in text breaks DOCX XML (truncates content after &).
+    """
     if value is None:
         return ""
     if isinstance(value, str):
-        return value.strip()
+        return value.strip().replace('&', '&amp;')
     if isinstance(value, list):
         return [_trim_strings_deep(v) for v in value]
     if isinstance(value, dict):
