@@ -299,8 +299,8 @@ def main(page: ft.Page):
         btn_global_stop.disabled = True
         btn_global_stop.text = "Wait..."
         btn_global_stop.icon = ft.icons.HOURGLASS_EMPTY
+        btn_global_stop.update()
         log_msg("🛑 Stop requested. Halting tasks...", "orange")
-        page.update()
 
     btn_global_stop = ft.ElevatedButton(
         "Stop", icon=ft.icons.CANCEL, color="white", bgcolor="red",
