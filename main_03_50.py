@@ -1809,7 +1809,7 @@ def main(page: ft.Page):
 
     set_api = ft.TextField(label="Gemini API Key", value=config.get("api_key", ""), password=True, can_reveal_password=True, text_size=13)
     set_github_token = ft.TextField(label="GitHub PAT (For API Limits)", value=config.get("github_token", ""), password=True, can_reveal_password=True, text_size=13)
-    set_proxy_url = ft.TextField(label="Gemini Proxy URL (optional, for restricted networks)", value=config.get("gemini_proxy_url", ""), hint_text="https://your-app.onrender.com/gemini/", text_size=13)
+    set_proxy_url = ft.TextField(label="Gemini Proxy URL (optional, for restricted networks)", value=config.get("gemini_proxy_url", ""), hint_text="https://webqcv.onrender.com", text_size=13)
     set_workspace = ft.TextField(label="Workspace Path", value=config.get("workspace_path", DEFAULT_WORKSPACE), text_size=13, expand=True)
     btn_browse = ft.ElevatedButton("Browse...", icon="folder", on_click=lambda _: workspace_picker.get_directory_path())
 
