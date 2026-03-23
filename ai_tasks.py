@@ -1245,7 +1245,74 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
         cbs['render']()
 
 # ==========================================
-# 8. GITHUB MINER TASK
+# 8. CV TAILOR TASK
+# ==========================================
+def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs):
+    try:
+        total_items = len(items)
+        cbs['progress'](0, "Calculating ETA...", True)
+        cbs['log'](f"Tailoring {total_items} CVs to JD...", "blue")
+
+        client = genai.Client(api_key=config.get("api_key", ""))
+        start_time = time.time()
+        session_cost = 0.0
+
+        for i, item in enumerate(items):
+            if task_state.get("cancel"):
+                cbs['log']("⏹️ CV Tailoring aborted by user.", "orange")
+                break
+
+            item['_status'] = 'processing'
+            cbs['render']()
+
+            current_idx = i + 1
+            cand_name = str(item['data']['basics'].get('name', 'Unknown')).replace('\n', ' ').strip()
+            eta_str = calc_eta(start_time, i, total_items)
+
+            cbs['progress'](i / total_items, f"Tailoring {current_idx}/{total_items}: {cand_name}{eta_str}", True)
+
+            input_json_str = json.dumps(item['data'], ensure_ascii=False)
+            prompt = config.get("prompt_tailor", DEFAULT_PROMPTS["prompt_tailor"]).replace("{jd_text}", jd_text).replace("{input_json_str}", input_json_str)
+
+            try:
+                resp = _retry_generate(client, MODEL_NAME, prompt)
+                i_tok = getattr(resp.usage_metadata, 'prompt_token_count', 0)
+                o_tok = getattr(resp.usage_metadata, 'candidates_token_count', 0)
+                cost = (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT)
+                session_cost += cost
+                cbs['billing'](i_tok, o_tok, cost)
+
+                txt = resp.text.strip().replace('```json', '').replace('```', '').strip()
+                tailored_data = sanitize_json(json.loads(txt))
+
+                out_orig = get_target_filename(item, config, ".docx")
+                base_name, ext = os.path.splitext(out_orig)
+                out_filename = f"{base_name}_tailored{ext}"
+                target_path = os.path.join(folders["TAILORED"], out_filename)
+
+                generate_docx_from_json(tailored_data, target_path, config)
+                cbs['log'](f"   ✅ Tailored & Saved: {out_filename} (Cost: ${cost:.4f})", "green")
+
+            except Exception as ex:
+                err = str(ex)
+                cbs['log'](f"Error tailoring {cand_name}: {err}", "red")
+                if check_api_error(err, cbs): break
+
+            item['_status'] = None
+            item['selected'] = False
+            cbs['render']()
+
+        for item in db_files: item['selected'] = False
+        if session_cost > 0:
+            cbs['log'](f"Tailoring Session Complete (Cost: ${session_cost:.4f})", "blue")
+            cbs['snack']("CV Tailoring complete!", "Open Folder", folders["TAILORED"])
+    finally:
+        cbs['progress'](0, "", False)
+        cbs['render']()
+
+
+# ==========================================
+# 9. GITHUB MINER TASK
 # ==========================================
 def gh_api_request(endpoint, token, cbs):
     try:

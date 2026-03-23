@@ -475,6 +475,8 @@ def main(page: ft.Page):
             dests.append(ft.NavigationRailDestination(icon="compare_arrows", label="CV Matcher"))
         if config.get("show_modify_tab", False):
             dests.append(ft.NavigationRailDestination(icon="edit_document", label="Modify CV"))
+        if config.get("show_tailor_tab", False):
+            dests.append(ft.NavigationRailDestination(icon="tune", label="CV Tailor"))
         if config.get("show_qa_tab", False):
             dests.append(ft.NavigationRailDestination(icon="psychology", label="AI Core Logic"))
         dests.extend([
@@ -502,6 +504,7 @@ def main(page: ft.Page):
         view_sourcing.visible = (label == "X-Ray Builder")
         view_matcher.visible = (label == "CV Matcher")
         view_modifier.visible = (label == "Modify CV")
+        view_tailor.visible = (label == "CV Tailor")
         view_github_miner.visible = (label == "GitHub Miner")
         view_ai_core.visible = (label == "AI Core Logic")
         view_logs.visible = (label == "Logs")
@@ -857,6 +860,31 @@ def main(page: ft.Page):
     view_modifier = ft.Column([
         ft.Text("AI CV Editor (beta)", size=24, weight="bold"), ft.Text("Select CVs, then describe how to change them. Original files will NOT be overwritten.", color="grey"),
         modifier_input, ft.Row([btn_run_modifier, ft.Container(expand=True), ft.ElevatedButton("Open Modified Folder", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["MODIFIED"]), color="blue")]),
+    ], visible=False, expand=True)
+
+    # --- TAB 4: CV TAILOR ---
+    tailor_jd_input = ft.TextField(
+        label="Job Description", multiline=True, min_lines=6, max_lines=10,
+        value=config.get("last_tailor_jd", ""),
+        hint_text="Paste the full job description here...",
+        on_change=lambda e: save_config(config.update({"last_tailor_jd": e.control.value}) or config)
+    )
+    btn_run_tailor = ft.ElevatedButton("Tailor & Generate CV", icon="tune", bgcolor="#4CAF50", color="white")
+
+    def act_run_tailor(e):
+        items = get_selected()
+        if not items: return show_snack("Please select CVs in the 'CVs' tab first!")
+        if len(tailor_jd_input.value) < 10: return show_snack("Please enter a Job Description!")
+        if not require_api_key(): return
+        run_in_background(run_tailor_task, items, tailor_jd_input.value, config, WORKSPACE_FOLDERS, task_state, db_files, cbs)
+    btn_run_tailor.on_click = act_run_tailor
+
+    view_tailor = ft.Column([
+        ft.Text("CV Tailor", size=24, weight="bold"),
+        ft.Text("Select CVs, paste a Job Description, and generate tailored versions. Original files will NOT be overwritten.", color="grey"),
+        ft.Text("Paste JD below:", color="grey"),
+        tailor_jd_input,
+        ft.Row([btn_run_tailor, ft.Container(expand=True), ft.ElevatedButton("Open Tailored Folder", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["TAILORED"]), color="blue")]),
     ], visible=False, expand=True)
 
     # --- TAB 5: GITHUB MINER ---
@@ -1727,13 +1755,13 @@ def main(page: ft.Page):
         for k, ui_c in zip([
             "api_key", "github_token", "workspace_path", "import_mode", "generate_docx_on_import",
             "anon_cut_name", "anon_remove_creds", "anon_mask_companies", "keep_initial_current_title",
-            "show_xray_tab", "show_github_tab", "show_matcher_tab", "show_modify_tab", "show_qa_tab",
+            "show_xray_tab", "show_github_tab", "show_matcher_tab", "show_modify_tab", "show_tailor_tab", "show_qa_tab",
             "active_template", "json_naming_template", "export_naming_template", "naming_template",
             "ui_theme", "qa_compare_mode", "autofix_threshold"
         ], [
             set_api, set_github_token, set_workspace, set_import_mode, set_generate_docx,
             set_anon_name, set_anon_creds, set_anon_comps, set_keep_initial_title,
-            set_show_xray, set_show_github, set_show_matcher, set_show_modify, set_show_qa,
+            set_show_xray, set_show_github, set_show_matcher, set_show_modify, set_show_tailor, set_show_qa,
             set_active_template, set_json_naming, set_export_naming, set_naming,
             set_theme, qa_compare_mode, set_autofix_threshold
         ]):
@@ -1763,6 +1791,7 @@ def main(page: ft.Page):
     set_show_github = ft.Switch(label="Show GitHub Tools", value=config.get("show_github_tab", False), on_change=lambda e: apply_settings(e=e))
     set_show_matcher = ft.Switch(label="Show CV Matcher", value=config.get("show_matcher_tab", False), on_change=lambda e: apply_settings(e=e))
     set_show_modify = ft.Switch(label="Show Modify CV", value=config.get("show_modify_tab", False), on_change=lambda e: apply_settings(e=e))
+    set_show_tailor = ft.Switch(label="Show CV Tailor", value=config.get("show_tailor_tab", False), on_change=lambda e: apply_settings(e=e))
     set_show_qa = ft.Switch(label="Show AI Core Logic Tab", value=config.get("show_qa_tab", False), on_change=lambda e: apply_settings(e=e))
     set_active_template = ft.Dropdown(label="Active DOCX Template", options=[ft.dropdown.Option(t) for t in get_available_templates()], value=config.get("active_template", "quantori_classic.docx"), text_size=13, height=50, on_change=lambda e: apply_settings(e=e))
     set_json_naming = ft.Dropdown(label="JSON Files Naming", options=[ft.dropdown.Option("Source Filename (source.json)"), ft.dropdown.Option("CV_FirstName_LastName.json")], value=config.get("json_naming_template", "CV_FirstName_LastName.json"), text_size=13, height=50)
@@ -1810,6 +1839,7 @@ def main(page: ft.Page):
             set_show_github,
             set_show_matcher,
             set_show_modify,
+            set_show_tailor,
             set_show_qa,
         ], spacing=2),
         ft.Container(height=10),
@@ -1839,7 +1869,7 @@ def main(page: ft.Page):
         content=ft.Row([
             nav_rail, 
             ft.VerticalDivider(width=1), 
-            ft.Container(content=ft.Stack([view_database, view_sourcing, view_matcher, view_modifier, view_github_miner, view_ai_core, view_logs, view_settings]), expand=True, padding=10)
+            ft.Container(content=ft.Stack([view_database, view_sourcing, view_matcher, view_modifier, view_tailor, view_github_miner, view_ai_core, view_logs, view_settings]), expand=True, padding=10)
         ], expand=True),
         expand=True,
         padding=10

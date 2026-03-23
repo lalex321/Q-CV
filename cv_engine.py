@@ -132,7 +132,7 @@ fix_docx_path_bug()
 # ==========================================
 
 MODEL_NAME = 'gemini-2.0-flash'
-APP_VERSION = "03.50"
+APP_VERSION = "03.51"
 
 # 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
 PRICE_1M_IN = 0.15
@@ -171,7 +171,7 @@ CV_JSON_SCHEMA = """{
   "skills": { "Category": ["Skill 1"] },
   "experience": [{
       "category": "String", "company_name": "String", "role": "String",
-      "dates": { "start": "String", "end": "String" },
+      "dates": { "start": "String — date or duration-only e.g. '6 years 5 months'", "end": "String — date, 'Present', or '' if only duration" },
       "location": "String", "project_description": "String",
       "highlights": ["String"], "environment": ["String"]
   }],
@@ -284,6 +284,24 @@ CRITICAL RULES:
 4. AGGRESSIVE SHORTENING: If the user asks to shorten or reduce the CV (e.g., to 1 page), you MUST aggressively summarize: keep only the most recent/relevant jobs, limit achievements to 2-3 bullet points per job, and clear out secondary courses/hobbies by setting their values to empty strings/arrays.
 5. Do not invent new work experience or skills unless the user asks you to infer or summarize existing ones.
 6. LANGUAGE STRICTNESS: ALWAYS output the modified JSON content in professional US English.
+
+INPUT JSON:
+{input_json_str}""",
+
+    "prompt_tailor": """You are an Expert CV Tailoring Specialist. Your task is to tailor the provided Candidate JSON to best match the given Job Description (JD), WITHOUT inventing any new experience, skills, or achievements.
+
+JOB DESCRIPTION:
+{jd_text}
+
+TAILORING RULES:
+1. Return ONLY a valid JSON object. No markdown, no explanations.
+2. Keep the EXACT same schema as the input JSON. Do not remove mandatory keys.
+3. SUMMARY: Rewrite bullet_points to highlight aspects most relevant to the JD. Use JD keywords naturally. Do not fabricate achievements.
+4. SKILLS: Reorder skill categories and items so the most JD-relevant ones appear first. Do not add skills not present in the original.
+5. EXPERIENCE highlights: For each role, reorder bullet points so the most JD-relevant ones come first. Trim highlights that are clearly irrelevant to the JD (set to empty array [] only if ALL highlights are irrelevant). Never invent new highlights.
+6. EXPERIENCE order: Do not reorder experience entries — keep chronological order.
+7. Do NOT change: name, contact details, dates, company names, role titles, education, certifications.
+8. Output in professional US English.
 
 INPUT JSON:
 {input_json_str}""",
@@ -476,6 +494,7 @@ def init_workspace_folders(base_dir):
         "OUTPUT": os.path.join(base_dir, 'docxs'),
         "BLIND": os.path.join(base_dir, 'docxs_a'),
         "MODIFIED": os.path.join(base_dir, 'docxs_modified'),
+        "TAILORED": os.path.join(base_dir, 'docxs_tailored'),
         "REPORTS": os.path.join(base_dir, 'reports'),
         "TEMPLATES": os.path.join(base_dir, 'templates')
     }
@@ -594,6 +613,16 @@ def _short_lang_level(s: str) -> str:
     if re.search(r"\bnative\b", t, flags=re.I):
         return "Native"
     return t
+
+_TECH_LANGUAGES = {
+    "python", "java", "javascript", "typescript", "sql", "r", "c", "go", "ruby",
+    "kotlin", "swift", "scala", "rust", "php", "perl", "matlab", "bash", "shell",
+    "css", "html", "xml", "json", "yaml", "dart", "lua", "groovy", "haskell",
+}
+
+def _is_probably_tech_language(word: str) -> bool:
+    return word.strip().lower() in _TECH_LANGUAGES
+
 
 def ensure_native_languages(data: dict) -> dict:
     """If raw text contains 'NATIVE <LANG>' and it's not in languages[], add it losslessly."""
