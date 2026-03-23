@@ -82,6 +82,21 @@ from google import genai
 from google.genai import types as genai_types
 
 # ==========================================
+# GEMINI CLIENT FACTORY (supports proxy URL)
+# ==========================================
+_GEMINI_PROXY_URL: str = ""
+
+def set_gemini_proxy_url(url: str) -> None:
+    global _GEMINI_PROXY_URL
+    _GEMINI_PROXY_URL = (url or "").strip()
+
+def _make_genai_client(api_key: str) -> genai.Client:
+    if _GEMINI_PROXY_URL:
+        return genai.Client(api_key=api_key,
+                            http_options=genai_types.HttpOptions(baseUrl=_GEMINI_PROXY_URL))
+    return genai.Client(api_key=api_key)
+
+# ==========================================
 # 🛡️ GLOBAL API RETRY HELPER (429 ERROR FIX)
 # ==========================================
 def _retry_generate(client, model_name, contents):
@@ -1394,8 +1409,8 @@ def extract_text_from_docx(docx_path: str) -> str:
 def process_file_gemini(file_path, api_key, custom_instructions, task_state=None): 
     # 🧠 Concatenate editable instructions and the protected schema
     final_prompt = custom_instructions + f"\n\n**JSON SCHEMA:**\n{CV_JSON_SCHEMA}"
-    
-    client = genai.Client(api_key=api_key)
+
+    client = _make_genai_client(api_key)
 
     if file_path.lower().endswith('.docx'):
         try:
@@ -1646,7 +1661,7 @@ def smart_anonymize_data(data, api_key, cfg):
             prompt = prompt_template.replace("{companies_json}", json.dumps(unique_comps, ensure_ascii=False))
             
             try:
-                client = genai.Client(api_key=api_key)
+                client = _make_genai_client(api_key)
                 response = _retry_generate(client, MODEL_NAME, prompt)
                 
                 i_tok = getattr(response.usage_metadata, 'prompt_token_count', 0)

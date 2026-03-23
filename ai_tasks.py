@@ -12,6 +12,7 @@ import urllib.error
 import base64
 from google import genai
 from google.genai import types as genai_types
+from cv_engine import _make_genai_client
 
 
 def _retry_generate(client, model_name, contents):
@@ -395,7 +396,7 @@ def run_batch_autofix_task(items, config, folders, task_state, db_files, cbs):
         cbs['log'](f"Starting Batch Auto-Fix for {total_items} CVs...", "purple")
         
         start_time = time.time()
-        client = genai.Client(api_key=config.get("api_key", ""))
+        client = _make_genai_client(config.get("api_key", ""))
         
         for idx, item in enumerate(items):
             if task_state.get("cancel"):
@@ -685,7 +686,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                             for k in ['match_analysis', '_source_filename', '_source_hash', 'import_date', 'qa_audit']: clean_data.pop(k, None)
                             
                             prompt_audit = config.get("prompt_qa", DEFAULT_PROMPTS["prompt_qa"]).replace("{json_str}", json.dumps(clean_data, ensure_ascii=False))
-                            client = genai.Client(api_key=api_key)
+                            client = _make_genai_client(api_key)
 
                             if path.lower().endswith('.docx'):
                                 text_doc = extract_text_from_docx(path)
@@ -844,7 +845,7 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
         cbs['log'](f"Running Matcher on {len(cands)} CVs...", "blue")
         
         parsed_all = []
-        client = genai.Client(api_key=config.get("api_key", ""))
+        client = _make_genai_client(config.get("api_key", ""))
         current_jd_hash = hashlib.md5(jd_val.strip().lower().encode('utf-8')).hexdigest()
         
         start_time = time.time()
@@ -966,7 +967,7 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
 def run_batch_qa_task(valid_candidates, sample_count, config, folders, task_state, cbs, on_complete_cb):
     try:
         cbs['progress'](0, "Calculating ETA...", True)
-        client = genai.Client(api_key=config.get("api_key", ""))
+        client = _make_genai_client(config.get("api_key", ""))
 
         aggregated_reports = []
         rows = []
@@ -1187,7 +1188,7 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
         cbs['progress'](0, "Calculating ETA...", True)
         cbs['log'](f"Modifying {total_items} CVs...", "blue")
 
-        client = genai.Client(api_key=config.get("api_key", ""))
+        client = _make_genai_client(config.get("api_key", ""))
         start_time = time.time()
         session_cost = 0.0
 
@@ -1253,7 +1254,7 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
         cbs['progress'](0, "Calculating ETA...", True)
         cbs['log'](f"Tailoring {total_items} CVs to JD...", "blue")
 
-        client = genai.Client(api_key=config.get("api_key", ""))
+        client = _make_genai_client(config.get("api_key", ""))
         api_key = config.get("api_key", "")
         start_time = time.time()
         session_cost = 0.0
@@ -1423,7 +1424,7 @@ def run_mine_github_task(keywords, location, min_stars, config, task_state, cbs,
 # ==========================================
 def run_xray_task(user_input, config, cbs, on_card_generated):
     try:
-        client = genai.Client(api_key=config.get("api_key", ""))
+        client = _make_genai_client(config.get("api_key", ""))
         prompt = config.get("prompt_xray", DEFAULT_PROMPTS["prompt_xray"]).replace("{user_input}", user_input[:1000])
 
         resp = _retry_generate(client, MODEL_NAME, prompt)

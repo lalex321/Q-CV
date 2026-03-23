@@ -22,6 +22,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import cv_engine
 from cv_engine import (
     APP_VERSION, MODEL_NAME, PRICE_1M_IN, PRICE_1M_OUT,
     SCRIPT_NAME, DEFAULT_WORKSPACE, DEFAULT_CONFIG,
@@ -153,6 +154,7 @@ def _save_qa_reports(payload: dict, config: dict, workspace_folders: dict) -> di
 # Initialize config early so main() can use it
 config = load_config()
 WORKSPACE_FOLDERS = init_workspace_folders(config.get('workspace_path', DEFAULT_WORKSPACE))
+cv_engine.set_gemini_proxy_url(config.get("gemini_proxy_url", ""))
 
 
 def _strip_hash_suffix(name: str) -> str:
@@ -1584,6 +1586,7 @@ def main(page: ft.Page):
         ("prompt_autofix", "✨ Auto-Fix"),
         ("prompt_matcher", "⚖️ CV Matcher"),
         ("prompt_modifier", "✍️ CV Modifier"),
+        ("prompt_tailor", "🎯 CV Tailor"),
         ("prompt_github", "🐙 GitHub Miner"),
         ("prompt_xray", "🔎 X-Ray Builder"),
         ("prompt_anonymize", "🕵️ Anonymizer"),
@@ -1782,13 +1785,13 @@ def main(page: ft.Page):
     def apply_settings(e=None, force_save=False):
         global config, WORKSPACE_FOLDERS
         for k, ui_c in zip([
-            "api_key", "github_token", "workspace_path", "import_mode", "generate_docx_on_import",
+            "api_key", "github_token", "gemini_proxy_url", "workspace_path", "import_mode", "generate_docx_on_import",
             "anon_cut_name", "anon_remove_creds", "anon_mask_companies", "keep_initial_current_title",
             "show_xray_tab", "show_github_tab", "show_matcher_tab", "show_modify_tab", "show_tailor_tab", "show_qa_tab",
             "active_template", "json_naming_template", "export_naming_template", "naming_template",
             "ui_theme", "qa_compare_mode", "autofix_threshold"
         ], [
-            set_api, set_github_token, set_workspace, set_import_mode, set_generate_docx,
+            set_api, set_github_token, set_proxy_url, set_workspace, set_import_mode, set_generate_docx,
             set_anon_name, set_anon_creds, set_anon_comps, set_keep_initial_title,
             set_show_xray, set_show_github, set_show_matcher, set_show_modify, set_show_tailor, set_show_qa,
             set_active_template, set_json_naming, set_export_naming, set_naming,
@@ -1796,6 +1799,7 @@ def main(page: ft.Page):
         ]):
             config[k] = ui_c.value
         save_config(config)
+        cv_engine.set_gemini_proxy_url(config.get("gemini_proxy_url", ""))
         WORKSPACE_FOLDERS = init_workspace_folders(config["workspace_path"]); update_nav_rail()
         if e or force_save: page.theme_mode = ft.ThemeMode.LIGHT if config["ui_theme"] == "Light" else ft.ThemeMode.DARK; page.update()
 
@@ -1805,6 +1809,7 @@ def main(page: ft.Page):
 
     set_api = ft.TextField(label="Gemini API Key", value=config.get("api_key", ""), password=True, can_reveal_password=True, text_size=13)
     set_github_token = ft.TextField(label="GitHub PAT (For API Limits)", value=config.get("github_token", ""), password=True, can_reveal_password=True, text_size=13)
+    set_proxy_url = ft.TextField(label="Gemini Proxy URL (optional, for restricted networks)", value=config.get("gemini_proxy_url", ""), hint_text="https://your-app.onrender.com/gemini/", text_size=13)
     set_workspace = ft.TextField(label="Workspace Path", value=config.get("workspace_path", DEFAULT_WORKSPACE), text_size=13, expand=True)
     btn_browse = ft.ElevatedButton("Browse...", icon="folder", on_click=lambda _: workspace_picker.get_directory_path())
 
@@ -1834,9 +1839,10 @@ def main(page: ft.Page):
     version_text = ft.Text(f"App Version: {APP_VERSION}", color="grey", size=12)
 
     col_left = ft.Column([
-        ft.Text("API Keys & Core Settings", weight="bold", color="#2196F3"), 
+        ft.Text("API Keys & Core Settings", weight="bold", color="#2196F3"),
         set_api,
         set_github_token,
+        set_proxy_url,
         ft.Row([set_workspace, btn_browse]),
         ft.Container(height=10),
         
