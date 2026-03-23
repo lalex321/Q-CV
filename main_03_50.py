@@ -1807,10 +1807,10 @@ def main(page: ft.Page):
     workspace_picker.on_result = lambda e: (setattr(set_workspace, 'value', e.path) or apply_settings()) if e.path else None
     page.overlay.append(workspace_picker)
 
-    set_api = ft.TextField(label="Gemini API Key", value=config.get("api_key", ""), password=True, can_reveal_password=True, text_size=13)
-    set_github_token = ft.TextField(label="GitHub PAT (For API Limits)", value=config.get("github_token", ""), password=True, can_reveal_password=True, text_size=13)
-    set_proxy_url = ft.TextField(label="Gemini Proxy URL (optional, for restricted networks)", value=config.get("gemini_proxy_url", ""), hint_text="https://webqcv.onrender.com", text_size=13)
-    set_workspace = ft.TextField(label="Workspace Path", value=config.get("workspace_path", DEFAULT_WORKSPACE), text_size=13, expand=True)
+    set_api = ft.TextField(label="Gemini API Key", value=config.get("api_key", ""), password=True, can_reveal_password=True, text_size=13, on_blur=lambda e: apply_settings())
+    set_github_token = ft.TextField(label="GitHub PAT (For API Limits)", value=config.get("github_token", ""), password=True, can_reveal_password=True, text_size=13, on_blur=lambda e: apply_settings())
+    set_proxy_url = ft.TextField(label="Gemini Proxy URL (optional, for restricted networks)", value=config.get("gemini_proxy_url", ""), hint_text="https://webqcv.onrender.com", text_size=13, on_blur=lambda e: apply_settings())
+    set_workspace = ft.TextField(label="Workspace Path", value=config.get("workspace_path", DEFAULT_WORKSPACE), text_size=13, expand=True, on_blur=lambda e: apply_settings())
     btn_browse = ft.ElevatedButton("Browse...", icon="folder", on_click=lambda _: workspace_picker.get_directory_path())
 
     set_import_mode = ft.RadioGroup(content=ft.Column([ft.Radio(value="none", label="Fast Import (Skip QA)"), ft.Radio(value="qa", label="Auto-QA (Audit Only)"), ft.Radio(value="fix", label="Auto-QA & Auto-Fix")], spacing=5), value=config.get("import_mode", "fix"))
