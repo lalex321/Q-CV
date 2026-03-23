@@ -1,4 +1,4 @@
-# Q-CV · v03.51
+# Q-CV · v03.52
 
 A desktop application for converting CVs from PDF, DOCX, or image formats into standardized Quantori Word document templates using Google Gemini AI.
 
