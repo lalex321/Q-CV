@@ -1,4 +1,4 @@
-# Q-CV
+# Q-CV · v03.51
 
 A desktop application for converting CVs from PDF, DOCX, or image formats into standardized Quantori Word document templates using Google Gemini AI.
 
@@ -10,9 +10,10 @@ A desktop application for converting CVs from PDF, DOCX, or image formats into s
 - **AutoFix**: Automatic repair of extraction issues based on QA reports
 - **Anonymization**: Removes PII (name, email, phone) and optionally masks company names
 - **CV Matcher**: Score candidates against a job description
+- **CV Tailor**: Tailor CVs to a specific Job Description — reorders skills and highlights, rewrites summary to match JD requirements without hallucinating new content
+- **Modify CV**: Apply AI-driven edits to existing CVs
 - **GitHub Miner**: Import GitHub profiles as CVs
 - **X-Ray Builder**: Generate Boolean search queries for sourcing
-- **Modify CV**: Apply AI-driven edits to existing CVs
 
 ## Setup
 
@@ -49,13 +50,20 @@ pyinstaller Q-CV.spec
 # Output: dist/Q-CV.app
 ```
 
+## Building (Windows)
+
+```bash
+pip install pyinstaller google-genai
+pyinstaller Q-CV.spec
+```
+
 ## Architecture
 
 | File | Role |
 |------|------|
 | `main_03_50.py` | Flet desktop UI — tabs, navigation, callbacks |
 | `cv_engine.py` | Core logic: Gemini API, JSON schema, DOCX generation, anonymization |
-| `ai_tasks.py` | Batch task orchestration: import, QA, autofix, matching, mining |
+| `ai_tasks.py` | Batch task orchestration: import, QA, autofix, matching, tailoring, mining |
 | `admin_qcv7.py` | Separate admin panel for settings and prompt management |
 
 ## Processing Pipeline
@@ -72,12 +80,14 @@ pyinstaller Q-CV.spec
 Default workspace: `~/Documents/Quantori_CV_Workplace/`
 
 ```
-source/      Input CV files
-jsons/       Extracted JSON files
-docxs/       Generated DOCX output
-docxs_a/     Anonymized DOCX output
-templates/   DOCX templates
-reports/     QA audit reports
+source/          Input CV files
+jsons/           Extracted JSON files
+docxs/           Generated DOCX output
+docxs_a/         Anonymized DOCX output
+docxs_modified/  Modified CV output (Modify CV tab)
+docxs_tailored/  Tailored CV output (CV Tailor tab)
+templates/       DOCX templates
+reports/         QA audit reports
 ```
 
 ## Stack

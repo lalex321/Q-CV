@@ -869,22 +869,51 @@ def main(page: ft.Page):
         hint_text="Paste the full job description here...",
         on_change=lambda e: save_config(config.update({"last_tailor_jd": e.control.value}) or config)
     )
+    tailor_anonymize_cb = ft.Checkbox(label="Anonymize", value=config.get("tailor_anonymize", False), on_change=lambda e: save_config(config.update({"tailor_anonymize": e.control.value}) or config))
     btn_run_tailor = ft.ElevatedButton("Tailor & Generate CV", icon="tune", bgcolor="#4CAF50", color="white")
+
+    tailor_results_table = ft.DataTable(
+        columns=[ft.DataColumn(ft.Text(n, weight="bold")) for n in ["Name", "Status", "Changes Made", "File"]],
+        rows=[], visible=False, column_spacing=15, data_row_min_height=40, data_row_max_height=80, heading_row_height=40
+    )
+    tailor_table_container = ft.Container(
+        content=ft.Column([tailor_results_table], scroll="auto"),
+        expand=True, border=ft.border.all(1, "#eeeeee"), padding=5, visible=False
+    )
+
+    def on_tailor_row_update(cand_name, status, notes, filename):
+        status_color = "green" if "✅" in status else "red"
+        tailor_results_table.rows.append(ft.DataRow(cells=[
+            ft.DataCell(ft.Text(cand_name, weight="bold", size=12, width=150)),
+            ft.DataCell(ft.Text(status, color=status_color, size=12, width=80)),
+            ft.DataCell(ft.Container(content=ft.Text(notes, size=12, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS), width=350, tooltip=notes)),
+            ft.DataCell(ft.Text(filename, size=11, color="grey", width=200)),
+        ]))
+        tailor_results_table.visible = True
+        tailor_table_container.visible = True
+        page.update()
 
     def act_run_tailor(e):
         items = get_selected()
         if not items: return show_snack("Please select CVs in the 'CVs' tab first!")
         if len(tailor_jd_input.value) < 10: return show_snack("Please enter a Job Description!")
         if not require_api_key(): return
-        run_in_background(run_tailor_task, items, tailor_jd_input.value, config, WORKSPACE_FOLDERS, task_state, db_files, cbs)
+        tailor_results_table.rows.clear()
+        tailor_results_table.visible = False
+        tailor_table_container.visible = False
+        page.update()
+        run_in_background(run_tailor_task, items, tailor_jd_input.value, config, WORKSPACE_FOLDERS, task_state, db_files, cbs, tailor_anonymize_cb.value, on_tailor_row_update)
     btn_run_tailor.on_click = act_run_tailor
 
     view_tailor = ft.Column([
         ft.Text("CV Tailor", size=24, weight="bold"),
-        ft.Text("Select CVs, paste a Job Description, and generate tailored versions. Original files will NOT be overwritten.", color="grey"),
+        ft.Text("Select CVs in the 'CVs' tab, paste a Job Description, and generate tailored versions.", color="grey"),
         ft.Text("Paste JD below:", color="grey"),
         tailor_jd_input,
-        ft.Row([btn_run_tailor, ft.Container(expand=True), ft.ElevatedButton("Open Tailored Folder", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["TAILORED"]), color="blue")]),
+        ft.Row([btn_run_tailor, tailor_anonymize_cb, ft.Container(expand=True),
+                ft.ElevatedButton("Open Tailored Folder", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["TAILORED"]), color="blue")]),
+        ft.Divider(),
+        tailor_table_container,
     ], visible=False, expand=True)
 
     # --- TAB 5: GITHUB MINER ---

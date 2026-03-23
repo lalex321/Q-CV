@@ -1247,13 +1247,14 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
 # ==========================================
 # 8. CV TAILOR TASK
 # ==========================================
-def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs):
+def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, anonymize=False, on_row_update=None):
     try:
         total_items = len(items)
         cbs['progress'](0, "Calculating ETA...", True)
         cbs['log'](f"Tailoring {total_items} CVs to JD...", "blue")
 
         client = genai.Client(api_key=config.get("api_key", ""))
+        api_key = config.get("api_key", "")
         start_time = time.time()
         session_cost = 0.0
 
@@ -1283,19 +1284,36 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs):
                 cbs['billing'](i_tok, o_tok, cost)
 
                 txt = resp.text.strip().replace('```json', '').replace('```', '').strip()
-                tailored_data = sanitize_json(json.loads(txt))
+                raw_data = json.loads(txt)
+                tailoring_notes = raw_data.get("_tailoring_notes", "")
+                cv_data = raw_data.get("cv", raw_data)  # fallback: if LLM returns flat JSON
+                cbs['log'](f"   [tailor] notes={repr(tailoring_notes[:120]) if tailoring_notes else '(empty)'}", "orange")
+                tailored_data = sanitize_json(cv_data)
 
                 out_orig = get_target_filename(item, config, ".docx")
                 base_name, ext = os.path.splitext(out_orig)
-                out_filename = f"{base_name}_tailored{ext}"
-                target_path = os.path.join(folders["TAILORED"], out_filename)
 
-                generate_docx_from_json(tailored_data, target_path, config)
+                if anonymize:
+                    anon_data, a_in, a_out, a_cost = smart_anonymize_data(tailored_data, api_key, config)
+                    session_cost += a_cost
+                    cbs['billing'](a_in, a_out, a_cost)
+                    out_filename = f"{base_name}_tailored_a{ext}"
+                    target_path = os.path.join(folders["BLIND"], out_filename)
+                    generate_docx_from_json(anon_data, target_path, config)
+                else:
+                    out_filename = f"{base_name}_tailored{ext}"
+                    target_path = os.path.join(folders["TAILORED"], out_filename)
+                    generate_docx_from_json(tailored_data, target_path, config)
+
                 cbs['log'](f"   ✅ Tailored & Saved: {out_filename} (Cost: ${cost:.4f})", "green")
+                if on_row_update:
+                    on_row_update(cand_name, "✅ Done", tailoring_notes, out_filename)
 
             except Exception as ex:
                 err = str(ex)
                 cbs['log'](f"Error tailoring {cand_name}: {err}", "red")
+                if on_row_update:
+                    on_row_update(cand_name, "❌ Error", err, "")
                 if check_api_error(err, cbs): break
 
             item['_status'] = None
@@ -1305,7 +1323,8 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs):
         for item in db_files: item['selected'] = False
         if session_cost > 0:
             cbs['log'](f"Tailoring Session Complete (Cost: ${session_cost:.4f})", "blue")
-            cbs['snack']("CV Tailoring complete!", "Open Folder", folders["TAILORED"])
+            folder = folders["BLIND"] if anonymize else folders["TAILORED"]
+            cbs['snack']("CV Tailoring complete!", "Open Folder", folder)
     finally:
         cbs['progress'](0, "", False)
         cbs['render']()

@@ -294,14 +294,16 @@ JOB DESCRIPTION:
 {jd_text}
 
 TAILORING RULES:
-1. Return ONLY a valid JSON object. No markdown, no explanations.
-2. Keep the EXACT same schema as the input JSON. Do not remove mandatory keys.
-3. SUMMARY: Rewrite bullet_points to highlight aspects most relevant to the JD. Use JD keywords naturally. Do not fabricate achievements.
-4. SKILLS: Reorder skill categories and items so the most JD-relevant ones appear first. Do not add skills not present in the original.
-5. EXPERIENCE highlights: For each role, reorder bullet points so the most JD-relevant ones come first. Trim highlights that are clearly irrelevant to the JD (set to empty array [] only if ALL highlights are irrelevant). Never invent new highlights.
-6. EXPERIENCE order: Do not reorder experience entries — keep chronological order.
-7. Do NOT change: name, contact details, dates, company names, role titles, education, certifications.
-8. Output in professional US English.
+1. Return ONLY a valid JSON object with exactly TWO top-level keys:
+   - "_tailoring_notes": a 2-3 sentence plain-English summary of specific changes made (e.g. "Promoted AWS and Docker skills to top. Reordered highlights in Dart Neuroscience to emphasize data pipeline work. Summary rewritten to highlight .NET and cloud experience.")
+   - "cv": the complete tailored CV JSON (same schema as input)
+2. No markdown, no explanations — raw JSON only.
+3. Inside "cv" — keep the EXACT same schema as the input JSON. Do not remove mandatory keys.
+4. SUMMARY: Rewrite cv.summary.bullet_points to highlight aspects most relevant to the JD. Use JD keywords naturally. Do not fabricate achievements.
+5. SKILLS: Reorder skill categories and items so the most JD-relevant ones appear first. Do not add skills not present in the original.
+6. EXPERIENCE highlights: For each role, reorder bullet points so the most JD-relevant ones come first. Trim highlights clearly irrelevant to the JD (set to [] only if ALL highlights are irrelevant). Never invent new highlights.
+7. EXPERIENCE order: keep chronological order. Do NOT change: name, contacts, dates, company names, role titles, education, certifications.
+8. Output cv content in professional US English.
 
 INPUT JSON:
 {input_json_str}""",
