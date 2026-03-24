@@ -1200,6 +1200,11 @@ def main(page: ft.Page):
             new_rows.append(ft.Container(content=ft.Row(r_cells, vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10), bgcolor=row_color, height=35, padding=ft.padding.only(left=10, right=10), border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.1, ft.colors.ON_SURFACE)))))
             
         cv_list_view.controls = new_rows; cv_count_text.value = f"{len(current_filtered_items)} / {len(db_files)} CVs"; page.update()
+        if task_state.get("running"):
+            proc_idx = next((i for i, x in enumerate(current_filtered_items) if x.get('_status') == 'processing'), None)
+            if proc_idx is not None:
+                try: cv_list_view.scroll_to(offset=max(0, (proc_idx - 3) * 35), duration=200)
+                except Exception: pass
 
     def get_selected(): return [item for item in db_files if item.get('selected', False)]
 
