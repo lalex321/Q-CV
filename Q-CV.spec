@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['main_03_50.py'],
+    ['main_03_52.py'],
     pathex=[],
     binaries=[],
     datas=[('quantori_classic.docx', '.')],
