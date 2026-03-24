@@ -290,9 +290,16 @@ def main(page: ft.Page):
     page.on_window_event = on_window_event
 
     db_files = []
-    current_filtered_items = []     
-    last_csv_count = 0 
+    current_filtered_items = []
+    last_csv_count = 0
     current_nav_label = "CVs"
+    shift_pressed = False
+    last_checked_idx = None
+
+    def on_keyboard_event(e):
+        nonlocal shift_pressed
+        shift_pressed = e.shift
+    page.on_keyboard_event = on_keyboard_event
 
     task_state = {"cancel": False, "running": False}
 
@@ -1033,9 +1040,18 @@ def main(page: ft.Page):
                 except: pass
         render_table()
 
-    def handle_checkbox_change(e, item_ref):
+    def handle_checkbox_change(e, item_ref, idx):
+        nonlocal last_checked_idx
         if task_state.get("running"): return
-        item_ref['selected'] = e.control.value
+        if shift_pressed and last_checked_idx is not None and last_checked_idx != idx:
+            lo, hi = sorted([last_checked_idx, idx])
+            for i in range(lo, hi + 1):
+                if 0 <= i < len(current_filtered_items):
+                    current_filtered_items[i]['selected'] = e.control.value
+            render_table()
+        else:
+            item_ref['selected'] = e.control.value
+        last_checked_idx = idx
         if current_filtered_items: master_checkbox.value = all(item.get('selected', False) for item in current_filtered_items)
         page.update()
 
@@ -1092,7 +1108,7 @@ def main(page: ft.Page):
         header_row.content.controls = h_cells
 
         new_rows = []
-        for item, s_prefix in filtered:
+        for row_idx, (item, s_prefix) in enumerate(filtered):
             name = _cv_get_name(item)
             role = _cv_get_role(item)
             d_str = time.strftime('%d %b %y', time.localtime(item['ts']))
@@ -1101,12 +1117,12 @@ def main(page: ft.Page):
             def create_dt_handler(item_ref): return lambda e: preview_single_cv(item_ref)
             def create_src_handler(item_ref): return lambda e: open_original_file(item_ref)
             def create_audit_handler(item_ref): return lambda e: act_cross_check(item_ref)
-            def create_cb_handler(item_ref): return lambda e: handle_checkbox_change(e, item_ref)
+            def create_cb_handler(item_ref, i): return lambda e: handle_checkbox_change(e, item_ref, i)
             
             dt_h = create_dt_handler(item)
             src_h = create_src_handler(item)
             aud_h = create_audit_handler(item)
-            cb = ft.Checkbox(value=item.get('selected', False), on_change=create_cb_handler(item))
+            cb = ft.Checkbox(value=item.get('selected', False), on_change=create_cb_handler(item, row_idx))
             # ----------------------------------
             
             src_fname = item['data'].get('_source_filename')
