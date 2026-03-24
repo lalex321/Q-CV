@@ -582,20 +582,26 @@ def main(page: ft.Page):
     # BACKGROUND TASK WRAPPER (Locking UI)
     # ==========================================
     def run_in_background(target_func, *args):
+        nonlocal current_sort_col, current_sort_asc
         task_state["cancel"] = False
         btn_global_stop.visible = True
         stopping_indicator.visible = False
-        
+
         btn_import.disabled = True; btn_generate.disabled = True; btn_anonymize.disabled = True
         btn_batch_autofix.disabled = True; btn_delete.disabled = True; btn_analyze.disabled = True
         btn_run_modifier.disabled = True; btn_mine.disabled = True; btn_generate_xray.disabled = True
         qa_btn_run.disabled = True; search_input.disabled = True; search_clear_btn.disabled = True
         task_state["running"] = True
+
+        saved_sort_col, saved_sort_asc = current_sort_col, current_sort_asc
+        current_sort_col = 3; current_sort_asc = True
         page.update()
 
         def wrapper():
+            nonlocal current_sort_col, current_sort_asc
             try: target_func(*args)
             finally:
+                current_sort_col, current_sort_asc = saved_sort_col, saved_sort_asc
                 btn_global_stop.visible = False
                 task_state["running"] = False
                 btn_global_stop.visible = False
