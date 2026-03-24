@@ -421,25 +421,18 @@ def main(page: ft.Page):
         test_key = api_dialog_input.value.strip()
         if not test_key:
             api_dialog_error.value = "Please enter an API Key."; api_dialog_error.visible = True; page.update(); return
-        api_dialog_error.visible = False; api_dialog_progress.visible = True; btn_verify_api.disabled = True; page.update()
-        try:
-            genai.Client(api_key=test_key).models.generate_content(model=MODEL_NAME, contents="hi")
-            config["api_key"] = test_key
-            save_config(config)
-            set_api.value = test_key 
-            api_key_dialog.open = False
-            show_snack("API Key verified and saved successfully!")
-        except Exception:
-            api_dialog_error.value = f"Validation failed: Invalid key or network issue."
-            api_dialog_error.visible = True
-        finally:
-            api_dialog_progress.visible = False; btn_verify_api.disabled = False; page.update()
+        config["api_key"] = test_key
+        save_config(config)
+        set_api.value = test_key
+        api_key_dialog.open = False
+        show_snack("API Key saved.")
+        page.update()
 
-    btn_verify_api = ft.ElevatedButton("Save & Verify", on_click=verify_and_save_api_key, bgcolor="#2196F3", color="white")
+    btn_verify_api = ft.ElevatedButton("Save", on_click=verify_and_save_api_key, bgcolor="#2196F3", color="white")
     api_key_dialog = ft.AlertDialog(
         modal=True, title=ft.Text("Welcome! Setup Gemini API Key"),
         content=ft.Column([ft.Text("To use AI generation, please provide your API key.", size=12, color="grey"), api_dialog_input, api_dialog_error], tight=True),
-        actions=[ft.TextButton("Cancel", on_click=lambda e: setattr(api_key_dialog, 'open', False) or page.update()), btn_verify_api, api_dialog_progress],
+        actions=[ft.TextButton("Cancel", on_click=lambda e: setattr(api_key_dialog, 'open', False) or page.update()), btn_verify_api],
         actions_alignment=ft.MainAxisAlignment.END,
     )
     page.overlay.append(api_key_dialog)
