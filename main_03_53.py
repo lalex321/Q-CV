@@ -610,6 +610,7 @@ def main(page: ft.Page):
                 btn_batch_autofix.disabled = False; btn_delete.disabled = False; btn_analyze.disabled = False
                 btn_run_modifier.disabled = False; btn_mine.disabled = False; btn_generate_xray.disabled = False
                 qa_btn_run.disabled = False; search_input.disabled = False; search_clear_btn.disabled = False
+                render_table()
                 page.update()
         threading.Thread(target=wrapper, daemon=True).start()
 
