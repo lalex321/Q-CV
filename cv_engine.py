@@ -955,7 +955,7 @@ def _normalize_date_to_english(s):
     return result
 
 def _normalize_dates_in_data(data):
-    """Walk experience/education/certifications and normalize all date strings to English."""
+    """Walk experience/education/certifications and normalize all date strings and locations to English."""
     for section_key in ('experience', 'education', 'certifications'):
         items = data.get(section_key)
         if not isinstance(items, list):
@@ -968,10 +968,95 @@ def _normalize_dates_in_data(data):
                 for k in ('start', 'end'):
                     if isinstance(dates.get(k), str):
                         dates[k] = _normalize_date_to_english(dates[k])
-            # Some schemas use date/period directly
             for k in ('date', 'period', 'year'):
                 if isinstance(item.get(k), str):
                     item[k] = _normalize_date_to_english(item[k])
+            if isinstance(item.get('location'), str):
+                item['location'] = _normalize_location_to_english(item['location'])
+
+_LOCATION_RU_TO_EN = {
+    # Countries
+    "россия": "Russia", "армения": "Armenia", "грузия": "Georgia",
+    "украина": "Ukraine", "беларусь": "Belarus", "белоруссия": "Belarus",
+    "казахстан": "Kazakhstan", "узбекистан": "Uzbekistan",
+    "кыргызстан": "Kyrgyzstan", "азербайджан": "Azerbaijan",
+    "молдова": "Moldova", "молдавия": "Moldova",
+    "латвия": "Latvia", "литва": "Lithuania", "эстония": "Estonia",
+    "германия": "Germany", "франция": "France", "испания": "Spain",
+    "италия": "Italy", "нидерланды": "Netherlands", "голландия": "Netherlands",
+    "великобритания": "United Kingdom", "англия": "England",
+    "швейцария": "Switzerland", "австрия": "Austria",
+    "польша": "Poland", "чехия": "Czech Republic", "венгрия": "Hungary",
+    "румыния": "Romania", "болгария": "Bulgaria", "сербия": "Serbia",
+    "хорватия": "Croatia", "словения": "Slovenia", "словакия": "Slovakia",
+    "греция": "Greece", "турция": "Turkey", "кипр": "Cyprus",
+    "израиль": "Israel", "оаэ": "UAE", "сша": "USA",
+    "канада": "Canada", "австралия": "Australia",
+    "япония": "Japan", "китай": "China", "индия": "India",
+    "южная корея": "South Korea", "сингапур": "Singapore",
+    "таиланд": "Thailand", "вьетнам": "Vietnam",
+    "бразилия": "Brazil", "аргентина": "Argentina", "мексика": "Mexico",
+    "португалия": "Portugal", "финляндия": "Finland", "швеция": "Sweden",
+    "норвегия": "Norway", "дания": "Denmark", "ирландия": "Ireland",
+    "бельгия": "Belgium", "люксембург": "Luxembourg",
+    # Cities
+    "москва": "Moscow", "санкт-петербург": "Saint Petersburg",
+    "новосибирск": "Novosibirsk", "екатеринбург": "Yekaterinburg",
+    "казань": "Kazan", "нижний новгород": "Nizhny Novgorod",
+    "самара": "Samara", "ростов-на-дону": "Rostov-on-Don",
+    "краснодар": "Krasnodar", "воронеж": "Voronezh",
+    "пермь": "Perm", "волгоград": "Volgograd",
+    "красноярск": "Krasnoyarsk", "томск": "Tomsk", "омск": "Omsk",
+    "уфа": "Ufa", "челябинск": "Chelyabinsk", "тюмень": "Tyumen",
+    "ереван": "Yerevan", "тбилиси": "Tbilisi", "баку": "Baku",
+    "киев": "Kyiv", "харьков": "Kharkiv", "одесса": "Odessa",
+    "львов": "Lviv", "днепр": "Dnipro",
+    "минск": "Minsk", "алматы": "Almaty", "астана": "Astana",
+    "ташкент": "Tashkent", "бишкек": "Bishkek",
+    "кишинёв": "Chisinau", "кишинев": "Chisinau",
+    "рига": "Riga", "вильнюс": "Vilnius", "таллин": "Tallinn",
+    "берлин": "Berlin", "мюнхен": "Munich", "гамбург": "Hamburg",
+    "париж": "Paris", "лион": "Lyon", "марсель": "Marseille",
+    "мадрид": "Madrid", "барселона": "Barcelona",
+    "рим": "Rome", "милан": "Milan",
+    "амстердам": "Amsterdam", "лондон": "London",
+    "вена": "Vienna", "цюрих": "Zurich", "женева": "Geneva",
+    "варшава": "Warsaw", "прага": "Prague", "будапешт": "Budapest",
+    "бухарест": "Bucharest", "софия": "Sofia", "белград": "Belgrade",
+    "загреб": "Zagreb", "любляна": "Ljubljana",
+    "афины": "Athens", "стамбул": "Istanbul", "анкара": "Ankara",
+    "тель-авив": "Tel Aviv", "иерусалим": "Jerusalem",
+    "дубай": "Dubai", "абу-даби": "Abu Dhabi",
+    "нью-йорк": "New York", "лос-анджелес": "Los Angeles",
+    "сан-франциско": "San Francisco",
+    "торонто": "Toronto", "монреаль": "Montreal", "ванкувер": "Vancouver",
+    "сидней": "Sydney", "мельбурн": "Melbourne",
+    "токио": "Tokyo", "пекин": "Beijing", "шанхай": "Shanghai",
+    "мумбаи": "Mumbai", "бангалор": "Bangalore",
+    "сеул": "Seoul", "бангкок": "Bangkok",
+    "лиссабон": "Lisbon", "хельсинки": "Helsinki",
+    "стокгольм": "Stockholm", "осло": "Oslo", "копенгаген": "Copenhagen",
+    "дублин": "Dublin", "брюссель": "Brussels",
+}
+
+def _normalize_location_to_english(loc):
+    """Translate common non-English location names to English."""
+    if not isinstance(loc, str) or not loc.strip():
+        return loc
+    result = loc.strip()
+    # Check if any non-ASCII Cyrillic present
+    if not any('\u0400' <= c <= '\u04ff' for c in result):
+        return result
+    # Split by comma and translate each part
+    parts = [p.strip() for p in result.split(',')]
+    translated = []
+    for part in parts:
+        low = part.lower().strip()
+        if low in _LOCATION_RU_TO_EN:
+            translated.append(_LOCATION_RU_TO_EN[low])
+        else:
+            translated.append(part)
+    return ", ".join(translated)
 
 def _is_future_date(s):
     """Return True if date string represents a month/year clearly in the future."""
@@ -1006,6 +1091,8 @@ def sanitize_json(data):
                 cleaned_val = val.strip().replace('\n', ' ').replace('\r', '')
                 if key == 'name' and cleaned_val:
                     if cleaned_val.isupper() or cleaned_val.islower(): cleaned_val = cleaned_val.title()
+                if key == 'location' and cleaned_val:
+                    cleaned_val = _normalize_location_to_english(cleaned_val)
                 data['basics'][key] = "" if cleaned_val.lower() in bad_values else cleaned_val
             else: 
                 data['basics'][key] = ", ".join(map(str, val)) if isinstance(val, list) else (str(val) if val else "")
