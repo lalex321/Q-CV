@@ -919,7 +919,9 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
                 
                 cbs['log'](f"   ✅ Analyzed: {cand_name} ({in_tok + out_tok:,} tokens)", "default")
                 
-                txt = resp.text.strip().replace('```json', '').replace('```', '').strip()
+                txt = (getattr(resp, 'text', '') or '').strip().replace('```json', '').replace('```', '').strip()
+                if not txt:
+                    raise ValueError("Empty response from Gemini")
                 parsed_item = json.loads(txt)
                 if isinstance(parsed_item, list) and len(parsed_item) > 0: parsed_item = parsed_item[0]
                 
