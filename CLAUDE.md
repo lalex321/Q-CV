@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 source venv/bin/activate
-python3 main_03_53.py
+python3 main_03_54.py
 ```
 
 ## Building the macOS App
@@ -26,7 +26,7 @@ pyinstaller Q-CV.spec
 ## Architecture
 
 ```
-main_03_53.py      Flet desktop UI: tabs, file browser, table rendering, task callbacks
+main_03_54.py      Flet desktop UI: tabs, file browser, table rendering, task callbacks
 ai_tasks.py        Batch task functions: import, QA, autofix, match, modify, X-Ray, GitHub mine
 cv_engine.py       Core: Gemini API calls, CV_JSON_SCHEMA, prompts, DOCX generation, anonymization
 admin_qcv7.py      Separate Flet app for admin settings and prompt versioning
@@ -72,6 +72,6 @@ Each function creates its own `genai.Client(api_key=...)` at the start:
 
 ### PyInstaller Notes
 
-- Entry point: `main_03_53.py` (defined in `Q-CV.spec`)
+- Entry point: `main_03_54.py` (defined in `Q-CV.spec`)
 - The `fix_docx_path_bug()` function in `cv_engine.py` creates missing `docx/parts/` and `docx/templates/` directories inside the frozen bundle at startup
 - Resources resolved via `get_resource_path()` which checks `sys._MEIPASS` when frozen

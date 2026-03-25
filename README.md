@@ -1,4 +1,4 @@
-# Q-CV · v03.52
+# Q-CV · v03.53
 
 A desktop application for converting CVs from PDF, DOCX, or image formats into standardized Quantori Word document templates using Google Gemini AI.
 
@@ -37,7 +37,7 @@ A Gemini API key is required. On first launch the app will prompt for it, or cre
 
 ```bash
 source venv/bin/activate
-python3 main_03_53.py
+python3 main_03_54.py
 ```
 
 The app opens a desktop window. On first run it will ask for your Gemini API key and create the workspace directory at `~/Documents/Quantori_CV_Workplace/`.
@@ -61,7 +61,7 @@ pyinstaller Q-CV.spec
 
 | File | Role |
 |------|------|
-| `main_03_50.py` | Flet desktop UI — tabs, navigation, callbacks |
+| `main_03_53.py` | Flet desktop UI — tabs, navigation, callbacks |
 | `cv_engine.py` | Core logic: Gemini API, JSON schema, DOCX generation, anonymization |
 | `ai_tasks.py` | Batch task orchestration: import, QA, autofix, matching, tailoring, mining |
 | `admin_qcv7.py` | Separate admin panel for settings and prompt management |
