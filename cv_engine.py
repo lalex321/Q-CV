@@ -903,6 +903,76 @@ CANONICAL_SECTION_TITLES = {
     "links", "ссылки",
 }
 
+_MONTH_RU_TO_EN = {
+    "январь": "January", "января": "January", "янв": "January",
+    "февраль": "February", "февраля": "February", "фев": "February",
+    "март": "March", "марта": "March", "мар": "March",
+    "апрель": "April", "апреля": "April", "апр": "April",
+    "май": "May", "мая": "May",
+    "июнь": "June", "июня": "June", "июн": "June",
+    "июль": "July", "июля": "July", "июл": "July",
+    "август": "August", "августа": "August", "авг": "August",
+    "сентябрь": "September", "сентября": "September", "сен": "September",
+    "октябрь": "October", "октября": "October", "окт": "October",
+    "ноябрь": "November", "ноября": "November", "ноя": "November",
+    "декабрь": "December", "декабря": "December", "дек": "December",
+    # Other common languages
+    "enero": "January", "febrero": "February", "marzo": "March",
+    "abril": "April", "mayo": "May", "junio": "June",
+    "julio": "July", "agosto": "August", "septiembre": "September",
+    "octubre": "October", "noviembre": "November", "diciembre": "December",
+    "januar": "January", "februar": "February", "märz": "March",
+    "juni": "June", "juli": "July", "oktober": "October",
+    "dezember": "December",
+    "janvier": "January", "février": "February", "mars": "March",
+    "avril": "April", "mai": "May", "juin": "June",
+    "juillet": "July", "août": "August", "septembre": "September",
+    "octobre": "October", "novembre": "November", "décembre": "December",
+}
+
+_DATE_KEYWORDS_RU = {
+    "по настоящее время": "Present", "настоящее время": "Present",
+    "н.в.": "Present", "наст. время": "Present",
+    "по наст. время": "Present", "текущий": "Present",
+}
+
+def _normalize_date_to_english(s):
+    """Translate non-English month names and keywords to English."""
+    if not isinstance(s, str) or not s.strip():
+        return s
+    result = s.strip()
+    low = result.lower()
+    # Check full keyword replacements first
+    for ru, en in _DATE_KEYWORDS_RU.items():
+        if ru in low:
+            return en
+    # Replace month names
+    for foreign, english in _MONTH_RU_TO_EN.items():
+        pattern = re.compile(r'\b' + re.escape(foreign) + r'\b', re.IGNORECASE)
+        if pattern.search(result):
+            result = pattern.sub(english, result)
+            break
+    return result
+
+def _normalize_dates_in_data(data):
+    """Walk experience/education/certifications and normalize all date strings to English."""
+    for section_key in ('experience', 'education', 'certifications'):
+        items = data.get(section_key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            dates = item.get('dates')
+            if isinstance(dates, dict):
+                for k in ('start', 'end'):
+                    if isinstance(dates.get(k), str):
+                        dates[k] = _normalize_date_to_english(dates[k])
+            # Some schemas use date/period directly
+            for k in ('date', 'period', 'year'):
+                if isinstance(item.get(k), str):
+                    item[k] = _normalize_date_to_english(item[k])
+
 def _is_future_date(s):
     """Return True if date string represents a month/year clearly in the future."""
     if not isinstance(s, str): return False
@@ -923,7 +993,8 @@ def _is_future_date(s):
 def sanitize_json(data):
     if not isinstance(data, dict): data = {}
     data = _strip_leading_list_markers_deep(data)
-    
+    _normalize_dates_in_data(data)
+
     backup_keys = {k: data.get(k) for k in ['qa_audit', 'match_analysis', '_source_filename', '_source_hash', 'import_date', '_comment']}
 
     if not isinstance(data.get('basics'), dict): data['basics'] = {}

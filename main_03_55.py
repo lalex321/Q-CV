@@ -602,6 +602,7 @@ def main(page: ft.Page):
         btn_run_modifier.disabled = True; btn_mine.disabled = True; btn_generate_xray.disabled = True
         qa_btn_run.disabled = True; search_input.disabled = True; search_clear_btn.disabled = True
         task_state["running"] = True
+        _grid_scroll_offset[0] = 0
 
         saved_sort_col, saved_sort_asc = current_sort_col, current_sort_asc
         current_sort_col = 3; current_sort_asc = True
@@ -1065,6 +1066,7 @@ def main(page: ft.Page):
         return ft.Container(**c_args)
 
     header_row = ft.Container(content=ft.Row([], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10), bgcolor=ft.colors.with_opacity(0.05, ft.colors.ON_SURFACE), padding=ft.padding.only(left=10, right=20), border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.1, ft.colors.ON_SURFACE))))
+    _grid_scroll_offset = [0]
     cv_list_view = ft.ListView(expand=True, spacing=0)
 
     def load_db_data():
@@ -1263,7 +1265,16 @@ def main(page: ft.Page):
         if task_state.get("running"):
             proc_idx = next((i for i, x in enumerate(current_filtered_items) if x.get('_status') == 'processing'), None)
             if proc_idx is not None:
-                try: cv_list_view.scroll_to(offset=max(0, (proc_idx - 3) * 35), duration=200)
+                try:
+                    row_h = 35
+                    visible_h = max(200, page.window_height - 200)
+                    visible_rows = max(1, int(visible_h / row_h))
+                    top_visible = int(_grid_scroll_offset[0] / row_h)
+                    bottom_visible = top_visible + visible_rows - 1
+                    if proc_idx > bottom_visible:
+                        new_offset = max(0, (proc_idx - visible_rows + 1) * row_h)
+                        cv_list_view.scroll_to(offset=new_offset, duration=200)
+                        _grid_scroll_offset[0] = new_offset
                 except Exception: pass
 
     def get_selected(): return [item for item in db_files if item.get('selected', False)]
