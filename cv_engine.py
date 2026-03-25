@@ -1097,6 +1097,11 @@ def sanitize_json(data):
             else: 
                 data['basics'][key] = ", ".join(map(str, val)) if isinstance(val, list) else (str(val) if val else "")
 
+    # Normalize location inside contacts dict too (LinkedIn puts it there)
+    contacts = data['basics'].get('contacts')
+    if isinstance(contacts, dict) and isinstance(contacts.get('location'), str):
+        contacts['location'] = _normalize_location_to_english(contacts['location'])
+
     raw_title = data['basics'].get('current_title', '')
     if isinstance(raw_title, str):
             raw_title = raw_title.replace('\n', ' ').replace('\r', '').strip()
