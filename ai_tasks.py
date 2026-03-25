@@ -369,8 +369,8 @@ def run_anonymize_task(items, config, folders, task_state, db_files, cbs):
                 t_path = os.path.join(folders["BLIND"], out_filename)
                 saved_path = generate_docx_from_json(blind_data, t_path, config)
                 
-                cost_str = f" (Cost: ${cost:.4f})" if cost > 0 else " (Free)"
-                if saved_path: cbs['log'](f"   Saved: {os.path.basename(saved_path)}{cost_str}", "green")
+                tok_str = f" ({in_tok + out_tok:,} tokens)" if cost > 0 else ""
+                if saved_path: cbs['log'](f"   Saved: {os.path.basename(saved_path)}{tok_str}", "green")
             except Exception as ex: 
                 err = str(ex)
                 cbs['log'](f"   ❌ Crash during anonymization: {err}", "red")
@@ -563,7 +563,7 @@ def run_batch_autofix_task(items, config, folders, task_state, db_files, cbs):
 
                 item['data'] = safe_data
                 item['ts'] = os.path.getmtime(json_path) 
-                cbs['log'](f"   ✅ Auto-Fixed: {cand_name} (Cost: ${cost:.4f})", "green")
+                cbs['log'](f"   ✅ Auto-Fixed: {cand_name} ({i_tok + o_tok:,} tokens)", "green")
                 
             except Exception as e:
                 bad_path = _save_bad_llm_payload(folders, 'autofix_exception', cand_name, locals().get('res_text', ''), {
@@ -634,6 +634,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                 if result and result[0]:
                     data, in_tok, out_tok, base_cost = result
                     total_cost = base_cost
+                    total_tokens = in_tok + out_tok
                     cbs['billing'](in_tok, out_tok, base_cost)
 
                     # --- 🟢 AUTO-DETECTOR LINKEDIN ---
@@ -707,6 +708,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                             o_tok = getattr(resp_qa.usage_metadata, 'candidates_token_count', 0)
                             qa_cost = (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT)
                             total_cost += qa_cost
+                            total_tokens += i_tok + o_tok
                             cbs['billing'](i_tok, o_tok, qa_cost)
 
                             qa_text = resp_qa.text
@@ -729,6 +731,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                     o_tok = getattr(fix_resp.usage_metadata, 'candidates_token_count', 0)
                                     fix_cost = (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT)
                                     total_cost += fix_cost
+                                    total_tokens += i_tok + o_tok
                                     cbs['billing'](i_tok, o_tok, fix_cost)
                                     
                                     res_text = getattr(fix_resp, 'text', '') or ''
@@ -753,6 +756,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                         i_tok = getattr(resp_reqa.usage_metadata, 'prompt_token_count', 0)
                                         o_tok = getattr(resp_reqa.usage_metadata, 'candidates_token_count', 0)
                                         total_cost += (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT)
+                                        total_tokens += i_tok + o_tok
                                         cbs['billing'](i_tok, o_tok, (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT))
                                         reqa_text = resp_reqa.text
                                         m_reqa = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', reqa_text, re.DOTALL)
@@ -810,9 +814,9 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                     db_files.append({'file': out_json, 'data': data, 'ts': os.path.getmtime(target_json_path), 'selected': False})
 
                     if generated_docx:
-                        cbs['log'](f"   ✅ Saved: {out_json} + {generated_docx} (Total Cost: ${total_cost:.4f})", "green")
+                        cbs['log'](f"   ✅ Saved: {out_json} + {generated_docx} ({total_tokens:,} tokens)", "green")
                     else:
-                        cbs['log'](f"   ✅ Saved: {out_json} (Total Cost: ${total_cost:.4f})", "green")
+                        cbs['log'](f"   ✅ Saved: {out_json} ({total_tokens:,} tokens)", "green")
                     cbs['render']()
                     
                 else: 
@@ -896,7 +900,7 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
                 session_cost += cost
                 cbs['billing'](in_tok, out_tok, cost)
                 
-                cbs['log'](f"   ✅ Analyzed: {cand_name} (Cost: ${cost:.4f})", "default")
+                cbs['log'](f"   ✅ Analyzed: {cand_name} ({in_tok + out_tok:,} tokens)", "default")
                 
                 txt = resp.text.strip().replace('```json', '').replace('```', '').strip()
                 parsed_item = json.loads(txt)
@@ -947,7 +951,7 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
                     fname_orig = cands[c_idx]['file'] if (0 <= c_idx < len(cands)) else "Unknown"
                     writer.writerow({'Score': p.get('score'), 'Name': p.get('name'), 'Verdict': p.get('verdict'), 'Pros': p.get('pros'), 'Missing Skills': p.get('missing_skills'), 'Filename': fname_orig})
             
-            cbs['log'](f"✅ Saved: {fname} (Analysis Cost: ${session_cost:.4f})", "green")
+            cbs['log'](f"✅ Saved: {fname}", "green")
             cbs['snack']("AI Analysis complete!", "Open Reports", folders["REPORTS"])
             
             # Pass results to UI for table rendering
@@ -1226,7 +1230,7 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
                 target_path = os.path.join(folders["MODIFIED"], out_mod_filename)
                 
                 generate_docx_from_json(mod_data, target_path, config)
-                cbs['log'](f"   ✅ Modified & Saved: {out_mod_filename} (Cost: ${cost:.4f})", "green")
+                cbs['log'](f"   ✅ Modified & Saved: {out_mod_filename} ({i_tok + o_tok:,} tokens)", "green")
                 
             except Exception as ex: 
                 err = str(ex)
@@ -1239,7 +1243,7 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
         
         for item in db_files: item['selected'] = False
         if session_cost > 0:
-            cbs['log'](f"Modification Session Complete (Cost: ${session_cost:.4f})", "blue")
+            cbs['log'](f"Modification Session Complete", "blue")
             cbs['snack']("CV Modification complete!", "Open Folder", folders["MODIFIED"])
     finally:
         cbs['progress'](0, "", False)
@@ -1306,7 +1310,7 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
                     target_path = os.path.join(folders["TAILORED"], out_filename)
                     generate_docx_from_json(tailored_data, target_path, config)
 
-                cbs['log'](f"   ✅ Tailored & Saved: {out_filename} (Cost: ${cost:.4f})", "green")
+                cbs['log'](f"   ✅ Tailored & Saved: {out_filename} ({i_tok + o_tok:,} tokens)", "green")
                 if on_row_update:
                     on_row_update(cand_name, "✅ Done", tailoring_notes, out_filename)
 
@@ -1323,7 +1327,7 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
 
         for item in db_files: item['selected'] = False
         if session_cost > 0:
-            cbs['log'](f"Tailoring Session Complete (Cost: ${session_cost:.4f})", "blue")
+            cbs['log'](f"Tailoring Session Complete", "blue")
             folder = folders["BLIND"] if anonymize else folders["TAILORED"]
             cbs['snack']("CV Tailoring complete!", "Open Folder", folder)
     finally:
@@ -1444,7 +1448,7 @@ def run_xray_task(user_input, config, cbs, on_card_generated):
             # Pass to UI for card rendering
             on_card_generated(platform_name, desc, query_str)
         
-        cbs['log'](f"Generated {len(queries)} X-Ray queries (Cost: ${cost:.4f})", "blue")
+        cbs['log'](f"Generated {len(queries)} X-Ray queries ({i_tok + o_tok:,} tokens)", "blue")
     except Exception as ex:
         cbs['log'](f"Error generating queries: {ex}", "red")
         cbs['snack']("Error generating queries. Check logs.")

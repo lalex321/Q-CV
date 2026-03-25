@@ -953,7 +953,7 @@ def main(page: ft.Page):
             new_data['import_date'] = time.time(); new_data['_source_filename'] = f"{domain_gh}.com/{login}"; new_data['_source_hash'] = f"gh_{file_hash}"; new_data['_comment'] = "Source: GitHub" 
             
             with open(os.path.join(WORKSPACE_FOLDERS["JSON"], out_json), 'w', encoding='utf-8') as f: json.dump(new_data, f, indent=2, ensure_ascii=False)
-            log_msg(f"   ✅ Imported {login} to CV Database (Cost: ${cost:.4f})", "green")
+            log_msg(f"   ✅ Imported {login} to CV Database ({i_tok + o_tok:,} tokens)", "green")
             btn_control.text = "Imported!"; btn_control.icon = "check"; btn_control.bgcolor = "grey"; page.update()
             load_db_data(); show_snack(f"Successfully imported @{login} to CV database!")
         except Exception as e:

@@ -893,9 +893,12 @@ CANONICAL_SECTION_TITLES = {
     "work experience", "experience", "опыт работы", "опыт",
     "education", "образование",
     "skills", "technical skills", "top skills", "навыки", "технические навыки",
+    "основные навыки", "ключевые навыки", "core competencies", "key skills",
     "languages", "языки",
-    "summary", "profile", "objective", "резюме", "о себе",
-    "certifications", "сертификаты",
+    "summary", "profile", "objective", "резюме", "о себе", "общие сведения",
+    "certifications", "сертификаты", "сертификации",
+    "contacts", "contact information", "contact", "способы связаться", "контакты",
+    "links", "ссылки",
 }
 
 def _is_future_date(s):
@@ -1201,11 +1204,7 @@ def sanitize_json(data):
     filtered_other = []
     for sec in clean_other:
         title = (sec.get("title", "") or "").strip().casefold()
-        if title == "languages" and data.get("languages"):
-            continue
-        if title == "certifications" and data.get("certifications"):
-            continue
-        if title == "education" and data.get("education"):
+        if title in CANONICAL_SECTION_TITLES:
             continue
         filtered_other.append(sec)
 
