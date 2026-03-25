@@ -13,6 +13,7 @@ import subprocess
 import hashlib
 import urllib.parse
 import base64
+import unicodedata
 import textwrap
 import random
 import traceback
@@ -349,7 +350,7 @@ def main(page: ft.Page):
         if len(logs_view.controls) > 500: logs_view.controls.pop(0)
         if current_nav_label == "Logs":
             try: logs_view.scroll_to(offset=-1, duration=50)
-            except: pass
+            except Exception: pass
         page.update()
 
     def show_snack(message, action_name=None, action_handler=None):
@@ -380,13 +381,15 @@ def main(page: ft.Page):
         page.run_task(lambda: require_api_key())
 
     # 🔗 INTERFACE FOR COMMUNICATION WITH ai_tasks.py
+    # All callbacks are wrapped in page.run_task() for thread safety —
+    # ai_tasks.py calls these from background threads.
     cbs = {
-        'log': log_msg,
-        'progress': set_global_progress,
-        'snack': lambda msg, a_name=None, a_path=None: show_snack(msg, action_name=a_name, action_handler=lambda _: open_folder(a_path) if a_path else None),
-        'render': render_table_and_update,
-        'billing': update_billing,
-        'api_error': handle_api_error
+        'log': lambda msg, color="default": page.run_task(lambda: log_msg(msg, color)),
+        'progress': lambda val, txt, vis: page.run_task(lambda: set_global_progress(val, txt, vis)),
+        'snack': lambda msg, a_name=None, a_path=None: page.run_task(lambda: show_snack(msg, action_name=a_name, action_handler=lambda _: open_folder(a_path) if a_path else None)),
+        'render': lambda: page.run_task(render_table_and_update),
+        'billing': lambda: page.run_task(update_billing),
+        'api_error': lambda: page.run_task(handle_api_error)
     }
 
     # ==========================================
@@ -398,12 +401,12 @@ def main(page: ft.Page):
             return
         err_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         try: page.run_task(lambda: log_msg(f"💥 GLOBAL CRASH:\n{err_msg}", "red"))
-        except: pass
+        except Exception: print(f"GLOBAL CRASH (UI unavailable):\n{err_msg}")
 
     def custom_thread_excepthook(args):
         err_msg = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
         try: page.run_task(lambda: log_msg(f"💥 THREAD CRASH ({args.thread.name}):\n{err_msg}", "red"))
-        except: pass
+        except Exception: print(f"THREAD CRASH (UI unavailable):\n{err_msg}")
 
     sys.excepthook = custom_excepthook
     threading.excepthook = custom_thread_excepthook
@@ -450,7 +453,7 @@ def main(page: ft.Page):
 
     def safe_int(val):
         try: return int(re.sub(r'[^\d]', '', str(val)))
-        except: return 0
+        except (ValueError, TypeError): return 0
 
     def get_available_templates():
         t_dir = WORKSPACE_FOLDERS.get("TEMPLATES", "")
@@ -487,7 +490,7 @@ def main(page: ft.Page):
                 if d.label == curr_label:
                     nav_rail.selected_index = i
                     break
-        except: nav_rail.selected_index = 0
+        except Exception: nav_rail.selected_index = 0
         page.update()
 
     def change_view(e=None, label=None):
@@ -517,7 +520,7 @@ def main(page: ft.Page):
             else: render_table()
         if label == "Logs":
             try: logs_view.scroll_to(offset=-1, duration=50)
-            except: pass
+            except Exception: pass
         if label == "CV Matcher":
             db_count = len(db_files)
             if not matcher_results_table.visible: matcher_info.value = f"{db_count} CVs in database."
@@ -633,12 +636,14 @@ def main(page: ft.Page):
         page.update()
 
         def _fix_task():
+            def _ui(fn): page.run_task(fn)
+            def _step(msg): _ui(lambda: (setattr(md_text, 'value', md_text.value + msg), page.update()))
             try:
-                md_text.value += "⏳ `[1/6]` Creating backup of current JSON...\n"; page.update()
+                _step("⏳ `[1/6]` Creating backup of current JSON...\n")
                 json_path = os.path.join(WORKSPACE_FOLDERS["JSON"], item['file'])
                 shutil.copy2(json_path, json_path.replace('.json', '.bak'))
 
-                md_text.value += "⏳ `[2/6]` Loading source document...\n"; page.update()
+                _step("⏳ `[2/6]` Loading source document...\n")
                 src_filename = item['data'].get('_source_filename')
                 src_path = os.path.join(WORKSPACE_FOLDERS["SOURCE"], src_filename)
 
@@ -651,19 +656,25 @@ def main(page: ft.Page):
                 if is_docx:
                     source_for_gemini = extract_text_from_docx(src_path)
                 else:
-                    import unicodedata as _ud
-                    _safe_name = _ud.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
+                    _safe_name = unicodedata.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
                     mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
-                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
-                    while sample.state.name == "PROCESSING": time.sleep(1); sample = client.files.get(name=sample.name)
+                    with open(src_path, 'rb') as _fh:
+                        sample = client.files.upload(file=_fh, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+                    _upload_wait = 0
+                    while sample.state.name == "PROCESSING":
+                        time.sleep(1)
+                        _upload_wait += 1
+                        if _upload_wait > 300:
+                            raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(src_path)}")
+                        sample = client.files.get(name=sample.name)
                     source_for_gemini = sample
 
                 fix_prompt = config.get("prompt_autofix", DEFAULT_PROMPTS["prompt_autofix"]).replace("{current_json_str}", json.dumps(item['data'], ensure_ascii=False)).replace("{qa_report_text}", qa_report_text)
 
-                md_text.value += "🧠 `[3/6]` Sending fix instructions to Gemini...\n"; page.update()
+                _step("🧠 `[3/6]` Sending fix instructions to Gemini...\n")
                 fix_resp = _retry_generate(client, MODEL_NAME, [fix_prompt, source_for_gemini]) if is_docx else _retry_generate(client, MODEL_NAME, [source_for_gemini, fix_prompt])
 
-                md_text.value += "📥 `[4/6]` Response received. Validating + safe merge...\n"; page.update()
+                _step("📥 `[4/6]` Response received. Validating + safe merge...\n")
                 res_text = getattr(fix_resp, 'text', '') or ''
                 fixed_data = sanitize_json(_parse_llm_json_payload(res_text))
 
@@ -674,11 +685,11 @@ def main(page: ft.Page):
                 min_chars = int(base_m["char_count"] * 0.985)
                 min_strs = max(0, base_m["str_count"] - 1)
                 if (new_m["str_count"] < min_strs) or (new_m["char_count"] < min_chars):
-                    md_text.value += f"⚠️ **Lossless gate rejected fix** (strings: {base_m['str_count']} → {new_m['str_count']}, chars: {base_m['char_count']} → {new_m['char_count']}). Original kept.\n"
-                    status.value = "⚠️ Fix rejected (data loss detected)"; status.color = "orange"
+                    _step(f"⚠️ **Lossless gate rejected fix** (strings: {base_m['str_count']} → {new_m['str_count']}, chars: {base_m['char_count']} → {new_m['char_count']}). Original kept.\n")
+                    _ui(lambda: (setattr(status, 'value', "⚠️ Fix rejected (data loss detected)"), setattr(status, 'color', "orange"), page.update()))
                     return
 
-                md_text.value += "🔬 `[5/6]` Re-QA: verifying fix actually improved quality...\n"; page.update()
+                _step("🔬 `[5/6]` Re-QA: verifying fix actually improved quality...\n")
                 try:
                     clean_fixed = copy.deepcopy(safe_data)
                     for k in ['match_analysis', '_source_filename', '_source_hash', 'import_date', 'qa_audit']:
@@ -692,19 +703,19 @@ def main(page: ft.Page):
                         new_score = reqa_result.get('score', 0)
                         if new_score > qa_score_before:
                             update_qa_audit_lossless(safe_data, reqa_result)
-                            md_text.value += f"✅ Score improved: {qa_score_before} → {new_score}/100\n"
+                            _step(f"✅ Score improved: {qa_score_before} → {new_score}/100\n")
                         else:
-                            md_text.value += f"↩️ **Fix reverted**: re-QA score {new_score} ≤ original {qa_score_before}. Original kept.\n"
-                            status.value = f"↩️ Fix reverted (score didn't improve)"; status.color = "orange"
+                            _step(f"↩️ **Fix reverted**: re-QA score {new_score} ≤ original {qa_score_before}. Original kept.\n")
+                            _ui(lambda: (setattr(status, 'value', "↩️ Fix reverted (score didn't improve)"), setattr(status, 'color', "orange"), page.update()))
                             return
                     else:
-                        md_text.value += "⚠️ Re-QA parse failed — applying fix anyway.\n"
+                        _step("⚠️ Re-QA parse failed — applying fix anyway.\n")
                         update_qa_audit_lossless(safe_data, {"score": qa_score_before, "status": f"Auto-Fixed on {time.strftime('%Y-%m-%d')} (re-QA unavailable)"})
                 except Exception as reqa_err:
-                    md_text.value += f"⚠️ Re-QA error ({reqa_err}) — applying fix anyway.\n"
+                    _step(f"⚠️ Re-QA error ({reqa_err}) — applying fix anyway.\n")
                     update_qa_audit_lossless(safe_data, {"score": qa_score_before, "status": f"Auto-Fixed on {time.strftime('%Y-%m-%d')} (re-QA failed)"})
 
-                md_text.value += "💾 `[6/6]` Saving...\n"; page.update()
+                _step("💾 `[6/6]` Saving...\n")
                 with open(json_path, 'w', encoding='utf-8') as f: json.dump(safe_data, f, indent=2, ensure_ascii=False)
                 item['data'] = safe_data; item['ts'] = os.path.getmtime(json_path)
 
@@ -715,14 +726,15 @@ def main(page: ft.Page):
                         diff_msgs.append(f"- **`{k.capitalize()}`** section was updated.")
                 if not diff_msgs: diff_msgs.append("- Only internal formatting/structure was repaired.")
 
-                md_text.value += "\n**What was changed:**\n" + "\n".join(diff_msgs)
-                status.value = "✅ Fix complete!"; status.color = "green"; btn_fix.visible = False
+                _changes = "\n**What was changed:**\n" + "\n".join(diff_msgs)
+                _ui(lambda: (setattr(md_text, 'value', md_text.value + _changes), setattr(status, 'value', "✅ Fix complete!"), setattr(status, 'color', "green"), setattr(btn_fix, 'visible', False), page.update()))
                 log_msg(f"✅ JSON Auto-Fixed for {item['data'].get('basics', {}).get('name', 'Candidate')}.", "green")
 
             except Exception as e:
-                md_text.value += f"\n❌ **ERROR:** {str(e)}\n"; status.value = "❌ Fix failed"; status.color = "red"
+                _err = str(e)
+                _ui(lambda: (setattr(md_text, 'value', md_text.value + f"\n❌ **ERROR:** {_err}\n"), setattr(status, 'value', "❌ Fix failed"), setattr(status, 'color', "red"), page.update()))
             finally:
-                progress.visible = False; render_table(); page.update()
+                _ui(lambda: (setattr(progress, 'visible', False), render_table(), page.update()))
 
         threading.Thread(target=_fix_task, daemon=True).start()
 
@@ -784,23 +796,38 @@ def main(page: ft.Page):
                     log_msg(f"   🔬 [QA Audit] Sending {src_filename} and JSON for cross-check...", "blue")
                     if src_path.lower().endswith('.docx'): resp_qa = client.models.generate_content(model=MODEL_NAME, contents=[prompt, extract_text_from_docx(src_path)])
                     else:
-                        sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type='application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'))
-                        while sample.state.name == "PROCESSING": time.sleep(1); sample = client.files.get(name=sample.name)
+                        _mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
+                        _safe_name = unicodedata.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or 'file'
+                        with open(src_path, 'rb') as _fh:
+                            sample = client.files.upload(file=_fh, config=genai_types.UploadFileConfig(mime_type=_mime, display_name=_safe_name))
+                        upload_wait = 0
+                        while sample.state.name == "PROCESSING":
+                            time.sleep(1)
+                            upload_wait += 1
+                            if upload_wait > 300:
+                                raise TimeoutError(f"File upload timed out: {os.path.basename(src_path)}")
+                            sample = client.files.get(name=sample.name)
                         resp_qa = client.models.generate_content(model=MODEL_NAME, contents=[sample, prompt])
 
-                    audit_result_text.value = resp_qa.text
-                    match = re.search(r'```json\s*(\{.*?\})\s*```', resp_qa.text, re.DOTALL) or re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', resp_qa.text)
+                    resp_text = resp_qa.text
+                    match = re.search(r'```json\s*(\{.*?\})\s*```', resp_text, re.DOTALL) or re.search(r'(\{[\s\S]*?"score"[\s\S]*?\})', resp_text)
+                    show_fix = False
                     if match:
                         try:
                             qa_result = extract_first_json_object(match.group(1))
                             item['data']['qa_audit'] = qa_result
                             with open(os.path.join(WORKSPACE_FOLDERS["JSON"], item['file']), 'w', encoding='utf-8') as f: json.dump(item['data'], f, indent=2, ensure_ascii=False)
-                            if qa_result.get('score', 100) < 100: btn_auto_fix.visible = True
-                        except: pass
-                    
-                    audit_progress.visible = False; audit_status.visible = False; render_table(); page.update()
+                            if qa_result.get('score', 100) < 100: show_fix = True
+                        except Exception as e: log_msg(f"⚠️ Failed to parse QA result: {e}", "orange")
+
+                    def _done():
+                        audit_result_text.value = resp_text
+                        if show_fix: btn_auto_fix.visible = True
+                        audit_progress.visible = False; audit_status.visible = False; render_table(); page.update()
+                    page.run_task(_done)
                 except Exception as e:
-                    audit_progress.visible = False; audit_status.value = f"Error: {str(e)}"; audit_status.color = "red"; page.update()
+                    _err = str(e)
+                    page.run_task(lambda: (setattr(audit_progress, 'visible', False), setattr(audit_status, 'value', f"Error: {_err}"), setattr(audit_status, 'color', "red"), page.update()))
 
             threading.Thread(target=_run_audit, daemon=True).start()
 
@@ -1053,7 +1080,7 @@ def main(page: ft.Page):
                 try:
                     p = os.path.join(json_f, f)
                     with open(p, 'r', encoding='utf-8') as jf: db_files.append({'file': f, 'data': json.load(jf), 'ts': os.path.getmtime(p), 'selected': False})
-                except: pass
+                except Exception as e: log_msg(f"⚠️ Skipped invalid JSON: {f} ({e})", "orange")
         render_table()
 
     def handle_checkbox_change(e, item_ref, idx):
@@ -1178,7 +1205,7 @@ def main(page: ft.Page):
                     i_ref['data']['basics']['current_company'] = e.control.value.strip()
                     try:
                         with open(os.path.join(WORKSPACE_FOLDERS["JSON"], i_ref['file']), 'w', encoding='utf-8') as f: json.dump(i_ref['data'], f, indent=2, ensure_ascii=False)
-                    except: pass
+                    except Exception as e_save: log_msg(f"Failed to save company edit: {e_save}", "red")
                     render_table()
                 return _save
 
@@ -1198,7 +1225,7 @@ def main(page: ft.Page):
                     i_ref['data']['_comment'] = e.control.value.strip()
                     try:
                         with open(os.path.join(WORKSPACE_FOLDERS["JSON"], i_ref['file']), 'w', encoding='utf-8') as f: json.dump(i_ref['data'], f, indent=2, ensure_ascii=False)
-                    except: pass
+                    except Exception as e: log_msg(f"Failed to save comment: {e}", "red")
                     render_table()
                 return _save_cm
 
@@ -1335,31 +1362,33 @@ def main(page: ft.Page):
                     ft.DataCell(ft.IconButton(icon=ft.icons.REMOVE_RED_EYE, icon_color="blue", tooltip="Preview CV", on_click=dt_handler))
                 ]))
             matcher_results_table.visible = True; table_container.visible = True; log_msg(f"Loaded previous report: {os.path.basename(latest_csv)}", "blue")
-        except: pass
+        except Exception as e: log_msg(f"⚠️ Failed to load previous report: {e}", "orange")
 
     def on_matcher_complete(parsed_all, cands):
-        nonlocal last_csv_count
-        last_csv_count = len(parsed_all)
-        matcher_results_table.rows.clear()
-        for p in parsed_all:
-            score_val = str(p.get('score', 0)); num_score = safe_int(score_val); score_color = "green" if num_score >= 70 else ("orange" if num_score >= 40 else "red")
-            try: c_idx = int(p.get('id', -1))
-            except: c_idx = -1
-            fname_orig = cands[c_idx]['file'] if (0 <= c_idx < len(cands)) else "Unknown"
-            
-            # --- FACTORY FOR PREVIEW IN MATCHER ---
-            def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
-            dt_handler = create_preview_handler(fname_orig)
-            
-            matcher_results_table.rows.append(ft.DataRow(cells=[
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(score_val, weight="bold", color=score_color, size=13), width=50))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('name', 'Unknown')), weight="bold", size=12), width=150))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('verdict', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=200, tooltip=format_tooltip(p.get('verdict', ''))))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('pros', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('pros', ''))))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('missing_skills', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('missing_skills', ''))))),
-                ft.DataCell(ft.IconButton(icon=ft.icons.REMOVE_RED_EYE, icon_color="blue", tooltip="Preview CV", on_click=dt_handler))
-            ]))
-        matcher_results_table.visible = True; table_container.visible = True; page.update()
+        def _update_matcher_ui():
+            nonlocal last_csv_count
+            last_csv_count = len(parsed_all)
+            matcher_results_table.rows.clear()
+            for p in parsed_all:
+                score_val = str(p.get('score', 0)); num_score = safe_int(score_val); score_color = "green" if num_score >= 70 else ("orange" if num_score >= 40 else "red")
+                try: c_idx = int(p.get('id', -1))
+                except (ValueError, TypeError): c_idx = -1
+                fname_orig = cands[c_idx]['file'] if (0 <= c_idx < len(cands)) else "Unknown"
+
+                # --- FACTORY FOR PREVIEW IN MATCHER ---
+                def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
+                dt_handler = create_preview_handler(fname_orig)
+
+                matcher_results_table.rows.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(score_val, weight="bold", color=score_color, size=13), width=50))),
+                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('name', 'Unknown')), weight="bold", size=12), width=150))),
+                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('verdict', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=200, tooltip=format_tooltip(p.get('verdict', ''))))),
+                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('pros', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('pros', ''))))),
+                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('missing_skills', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('missing_skills', ''))))),
+                    ft.DataCell(ft.IconButton(icon=ft.icons.REMOVE_RED_EYE, icon_color="blue", tooltip="Preview CV", on_click=dt_handler))
+                ]))
+            matcher_results_table.visible = True; table_container.visible = True; page.update()
+        page.run_task(_update_matcher_ui)
 
     def run_matcher_action(e):
         if not db_files: return show_snack("Database is empty! Import CVs first.")

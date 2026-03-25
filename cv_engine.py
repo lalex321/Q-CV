@@ -141,7 +141,7 @@ def fix_docx_path_bug():
             if not os.path.exists(footer):
                 with open(footer, 'wb') as f:
                     f.write(b"<?xml version='1.0' encoding='UTF-8' standalone='yes'?>\n<w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"></w:ftr>")
-        except: pass
+        except Exception: pass  # Non-critical: frozen bundle path fix
 
 fix_docx_path_bug()
 # ==========================================
@@ -1424,7 +1424,8 @@ def process_file_gemini(file_path, api_key, custom_instructions, task_state=None
         mime = 'application/pdf' if file_path.lower().endswith('.pdf') else 'image/jpeg'
         import unicodedata as _ud
         _safe_name = _ud.normalize('NFKD', os.path.basename(file_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
-        sample = client.files.upload(file=file_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+        with open(file_path, 'rb') as _fh:
+            sample = client.files.upload(file=_fh, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
         upload_wait = 0
         while sample.state.name == "PROCESSING":
             if task_state and task_state.get("cancel"): return None, 0, 0, 0.0

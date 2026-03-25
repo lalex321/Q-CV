@@ -446,10 +446,15 @@ def run_batch_autofix_task(items, config, folders, task_state, db_files, cbs):
                     mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
                     import unicodedata as _ud
                     _safe_name = _ud.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
-                    sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+                    with open(src_path, 'rb') as _fh:
+                        sample = client.files.upload(file=_fh, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+                    _upload_wait = 0
                     while sample.state.name == "PROCESSING":
                         if task_state.get("cancel"): break
                         time.sleep(1)
+                        _upload_wait += 1
+                        if _upload_wait > 300:
+                            raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(src_path)}")
                         sample = client.files.get(name=sample.name)
                     if task_state.get("cancel"): break
                     source_for_gemini = sample
@@ -699,10 +704,15 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                 mime = 'application/pdf' if path.lower().endswith('.pdf') else 'image/jpeg'
                                 import unicodedata as _ud
                                 _safe_name = _ud.normalize('NFKD', os.path.basename(path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
-                                sample = client.files.upload(file=path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+                                with open(path, 'rb') as _fh:
+                                    sample = client.files.upload(file=_fh, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+                                _upload_wait = 0
                                 while sample.state.name == "PROCESSING":
                                     if task_state.get("cancel"): break
                                     time.sleep(1)
+                                    _upload_wait += 1
+                                    if _upload_wait > 300:
+                                        raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(path)}")
                                     sample = client.files.get(name=sample.name)
                                 if task_state.get("cancel"): break
                                 resp_qa = _retry_generate(client, MODEL_NAME, [sample, prompt_audit])
@@ -825,14 +835,17 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                 else: 
                     cbs['log'](f"   ❌ Failed to process: {filename}", "red")
             
-            except Exception as ex: 
+            except Exception as ex:
                 err = str(ex)
+                import traceback
+                tb = traceback.format_exc()
                 try:
                     if locals().get('res_text'):
-                        bad_path = _save_bad_llm_payload(folders, 'import_exception', filename, locals().get('res_text', ''), {'candidate': filename, 'reason': 'exception', 'stage': 'import', 'error': err})
+                        bad_path = _save_bad_llm_payload(folders, 'import_exception', filename, locals().get('res_text', ''), {'candidate': filename, 'reason': 'exception', 'stage': 'import', 'error': err, 'traceback': tb})
                         cbs['log'](f"   Error: {err} | Saved details to {bad_path}", "red")
                     else:
                         cbs['log'](f"   Error: {err}", "red")
+                        cbs['log'](f"   {tb.strip().splitlines()[-2] if len(tb.strip().splitlines()) >= 2 else tb.strip()}", "red")
                 except Exception:
                     cbs['log'](f"   Error: {err}", "red")
                 if check_api_error(err, cbs): break
@@ -1048,11 +1061,16 @@ def run_batch_qa_task(valid_candidates, sample_count, config, folders, task_stat
                         mime = 'application/pdf' if src_path.lower().endswith('.pdf') else 'image/jpeg'
                         import unicodedata as _ud
                         _safe_name = _ud.normalize('NFKD', os.path.basename(src_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
-                        sample = client.files.upload(file=src_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+                        with open(src_path, 'rb') as _fh:
+                            sample = client.files.upload(file=_fh, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+                        _upload_wait = 0
                         while sample.state.name == "PROCESSING":
                             if task_state.get("cancel"):
                                 break
                             time.sleep(1)
+                            _upload_wait += 1
+                            if _upload_wait > 300:
+                                raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(src_path)}")
                             sample = client.files.get(name=sample.name)
                         if task_state.get("cancel"):
                             return
