@@ -897,7 +897,8 @@ CANONICAL_SECTION_TITLES = {
     "skills", "technical skills", "top skills", "навыки", "технические навыки",
     "основные навыки", "ключевые навыки", "core competencies", "key skills",
     "languages", "языки",
-    "summary", "profile", "objective", "резюме", "о себе", "общие сведения",
+    "summary", "summary of qualifications", "professional summary", "career summary",
+    "profile", "objective", "резюме", "о себе", "общие сведения",
     "certifications", "сертификаты", "сертификации",
     "contacts", "contact information", "contact", "способы связаться", "контакты",
     "links", "ссылки",
@@ -1112,9 +1113,14 @@ def sanitize_json(data):
             
     clean_title = raw_title
     if clean_title:
+            # Strip common prefixes that LLM sometimes prepends
+            clean_title = re.sub(r'^(Objective|Summary|Profile|About)\s*:\s*', '', clean_title, flags=re.IGNORECASE).strip()
             clean_title = re.split(r'\s*\|\s*|\s*-\s*|\s*,\s*|\s+at\s+|\s+@\s+', clean_title, flags=re.IGNORECASE)[0].strip()
             if clean_title.isupper(): clean_title = clean_title.title()
-            if len(clean_title) > 100 or len(clean_title) < 2: clean_title = ""
+            if len(clean_title) > 80 or len(clean_title) < 2: clean_title = ""
+            # Reject sentence-like text (objective/summary leaked into title)
+            if clean_title and re.search(r'\b(years?\s+of|experience\s+in|responsible\s+for|worked\s+(in|at|on)|passionate\s+about)\b', clean_title, re.IGNORECASE):
+                clean_title = ""
 
     # If title looks like a location (e.g. "Bay Area/San Diego") rather than a job title, discard it
     if clean_title and '/' in clean_title:
@@ -1181,6 +1187,14 @@ def sanitize_json(data):
         
         c_val = job.get('company_name')
         job['company_name'] = "" if (isinstance(c_val, str) and c_val.lower().strip() in bad_values) else (c_val if isinstance(c_val, str) else "")
+
+        # Normalize ALLCAPS roles (e.g. "SENIOR SOFTWARE ENGINEER" → "Senior Software Engineer")
+        role_val = job.get('role', '')
+        if isinstance(role_val, str) and role_val == role_val.upper() and len(role_val) > 3:
+            _role_acronyms = {'QA', 'VP', 'CTO', 'CIO', 'CFO', 'CEO', 'IT', 'HR', 'PM', 'DBA',
+                              'SDET', 'UX', 'UI', 'DevOps', 'SRE', 'ML', 'AI', 'BA', 'BI'}
+            words = re.split(r'(\s+|/)', role_val)  # preserve separators
+            job['role'] = ''.join(w if w.strip() in _role_acronyms else w.title() for w in words)
 
     # Deduplicate experience entries by (company_name, role, start_date)
     seen_exp = set()
@@ -1300,10 +1314,20 @@ def sanitize_json(data):
             return None
         return {"title": title, "items": items}
 
+    # If basics.summary is empty, rescue content from summary-like other_sections before filtering
+    _summary_like = {'summary', 'summary of qualifications', 'professional summary',
+                     'career summary', 'executive summary', 'profile summary'}
     merged_other = []
     for sec in data.get('other_sections', []):
         norm = _normalize_other_section(sec, title_keys=("title", "section_title"))
-        if norm and norm["title"].strip().lower() not in CANONICAL_SECTION_TITLES:
+        if not norm:
+            continue
+        sec_title_lower = norm["title"].strip().lower()
+        # Rescue summary content before discarding canonical sections
+        if not data['basics'].get('summary') and sec_title_lower in _summary_like and norm.get("items"):
+            data['basics']['summary'] = "\n".join(norm["items"])
+            continue
+        if sec_title_lower not in CANONICAL_SECTION_TITLES:
             merged_other.append(norm)
     # Migrate legacy top-level non-core fields into other_sections
     # so other_sections becomes the only canonical non-core bucket.
@@ -1772,11 +1796,14 @@ def generate_docx_from_json(data, output_path, cfg):
             if title or lines:
                 other_sections.append({"title": title, "items": lines})
 
-    # Normalize ALLCAPS titles to Title Case
+    # Normalize ALLCAPS titles to Title Case (handles mixed like "SUMMARY of QUALIFICATIONS")
     for sec in other_sections:
         t = sec.get("title", "")
-        if t and t == t.upper() and len(t) > 3:
-            sec["title"] = t.title()
+        if t and len(t) > 3:
+            words = t.split()
+            upper_count = sum(1 for w in words if w == w.upper() and len(w) > 1)
+            if upper_count > len(words) / 2:
+                sec["title"] = t.title()
 
     deduped_other = []
     seen_other = set()
