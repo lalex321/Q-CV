@@ -147,7 +147,7 @@ fix_docx_path_bug()
 # ==========================================
 
 MODEL_NAME = 'gemini-2.0-flash'
-APP_VERSION = "03.54"
+APP_VERSION = "03.55"
 
 # 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
 PRICE_1M_IN = 0.15
@@ -1425,9 +1425,13 @@ def process_file_gemini(file_path, api_key, custom_instructions, task_state=None
         import unicodedata as _ud
         _safe_name = _ud.normalize('NFKD', os.path.basename(file_path)).encode('ascii', 'ignore').decode('ascii') or "cv_file"
         sample = client.files.upload(file=file_path, config=genai_types.UploadFileConfig(mime_type=mime, display_name=_safe_name))
+        upload_wait = 0
         while sample.state.name == "PROCESSING":
             if task_state and task_state.get("cancel"): return None, 0, 0, 0.0
             time.sleep(1)
+            upload_wait += 1
+            if upload_wait > 300:
+                raise TimeoutError(f"File upload processing timed out after 5 minutes: {os.path.basename(file_path)}")
             sample = client.files.get(name=sample.name)
         if task_state and task_state.get("cancel"): return None, 0, 0, 0.0
         response = _retry_generate(client, MODEL_NAME, [sample, final_prompt])
@@ -1618,14 +1622,14 @@ def generate_docx_from_json(data, output_path, cfg):
         return output_path
     except PermissionError:
         base, ext = os.path.splitext(output_path)
-        counter = 1
-        while True:
+        for counter in range(1, 20):
             target_path = f"{base}_{counter:02d}{ext}"
             try:
                 doc.save(target_path)
                 return target_path
             except PermissionError:
-                counter += 1
+                continue
+        raise PermissionError(f"Cannot save DOCX after 20 attempts: {output_path}")
 
 
 
@@ -1671,7 +1675,7 @@ def smart_anonymize_data(data, api_key, cfg):
                 
                 text = response.text.replace('```json', '').replace('```', '').strip()
                 mapping = json.loads(text)
-            except: 
+            except Exception:
                 mapping = {name: "Confidential Company" for name in unique_comps}
 
             for job in experiences:

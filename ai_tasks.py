@@ -102,6 +102,8 @@ def _parse_llm_json_payload(res_text: str):
         start = txt.find('{')
         if start >= 0:
             txt = txt[start:]
+        else:
+            raise ValueError("No JSON object found in LLM response")
     parsed, _ = json.JSONDecoder().raw_decode(txt)
     return parsed
 
@@ -673,7 +675,8 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
 
                     dest_path = os.path.join(folders["SOURCE"], new_source_filename)
                     try: shutil.copy2(path, dest_path)
-                    except: pass
+                    except Exception as cp_err:
+                        cbs['log'](f"   Warning: could not copy source file: {cp_err}", "orange")
 
                     data['import_date'] = time.time()
                     data['_source_filename'] = new_source_filename
@@ -927,13 +930,16 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
             analyzed_count += 1
 
         try:
-            if not parsed_all: return
+            if not parsed_all:
+                cbs['log']("No candidates were analyzed.", "orange")
+                on_complete_cb([], cands)
+                return
 
             clean_parsed_all = []
             for p in parsed_all:
                 if not isinstance(p, dict): continue
                 try: p['score'] = int(re.sub(r'[^\d]', '', str(p.get('score', 0))))
-                except: p['score'] = 0
+                except (ValueError, TypeError): p['score'] = 0
                 clean_parsed_all.append(p)
                 
             parsed_all = sorted(clean_parsed_all, key=lambda x: x['score'], reverse=True)
@@ -947,7 +953,7 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
                 writer.writeheader()
                 for p in parsed_all:
                     try: c_idx = int(p.get('id', -1))
-                    except: c_idx = -1
+                    except (ValueError, TypeError): c_idx = -1
                     fname_orig = cands[c_idx]['file'] if (0 <= c_idx < len(cands)) else "Unknown"
                     writer.writerow({'Score': p.get('score'), 'Name': p.get('name'), 'Verdict': p.get('verdict'), 'Pros': p.get('pros'), 'Missing Skills': p.get('missing_skills'), 'Filename': fname_orig})
             
