@@ -1609,6 +1609,12 @@ def generate_docx_from_json(data, output_path, cfg):
             if title or lines:
                 other_sections.append({"title": title, "items": lines})
 
+    # Normalize ALLCAPS titles to Title Case
+    for sec in other_sections:
+        t = sec.get("title", "")
+        if t and t == t.upper() and len(t) > 3:
+            sec["title"] = t.title()
+
     deduped_other = []
     seen_other = set()
     for sec in other_sections:
