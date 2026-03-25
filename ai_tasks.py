@@ -360,14 +360,13 @@ def run_anonymize_task(items, config, folders, task_state, db_files, cbs):
                 blind_data, in_tok, out_tok, cost = smart_anonymize_data(item['data'], api_key, config)
                 if cost > 0: cbs['billing'](in_tok, out_tok, cost)
                     
-                file_hash = hashlib.md5(item['file'].encode('utf-8')).hexdigest()[:4]
                 if blind_pref == "CV FirstName FirstLetter (CV_Alexei_L.docx)":
                     short_name = blind_data.get('basics', {}).get('name', 'Candidate')
                     safe_name = re.sub(r'[^\w\s]', '', short_name).strip().replace(' ', '_')
-                    out_filename = f"CV_{safe_name}_{file_hash}.docx"
+                    out_filename = f"CV_{safe_name}.docx"
                 else:
                     base_n = os.path.splitext(item['file'])[0]
-                    out_filename = f"{base_n}_a_{file_hash}.docx"
+                    out_filename = f"{base_n}_a.docx"
 
                 t_path = os.path.join(folders["BLIND"], out_filename)
                 saved_path = generate_docx_from_json(blind_data, t_path, config)
