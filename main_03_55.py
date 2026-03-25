@@ -25,7 +25,7 @@ from pathlib import Path
 
 import cv_engine
 from cv_engine import (
-    APP_VERSION, MODEL_NAME, PRICE_1M_IN, PRICE_1M_OUT,
+    APP_VERSION, MODEL_NAME, PRICE_1M_IN, PRICE_1M_OUT, FILE_UPLOAD_TIMEOUT_SEC, DOCX_SAVE_MAX_RETRIES,
     SCRIPT_NAME, DEFAULT_WORKSPACE, DEFAULT_CONFIG,
     DEFAULT_PROMPTS, CV_JSON_SCHEMA, CURRENT_PROMPT_MASTER_VERSION,
     load_config, save_config, init_workspace_folders, open_folder,
@@ -36,6 +36,10 @@ from cv_engine import (
 
 from ai_tasks import *
 from ai_tasks import _parse_llm_json_payload, _qa_audit_get_latest, _retry_generate
+
+# ── Tunable constants ──
+MAX_LOG_LINES = 500
+SEARCH_DEBOUNCE_SEC = 0.2
 
 
 def normalize_qa_audit(qa_audit):
@@ -284,6 +288,8 @@ def main(page: ft.Page):
     page.padding = 0
 
     def on_window_event(e):
+        if e.data == "close":
+            if search_timer: search_timer.cancel()
         if e.data in ("resize", "resized"):
             config["window_width"] = page.window_width
             config["window_height"] = page.window_height
@@ -296,6 +302,7 @@ def main(page: ft.Page):
     current_nav_label = "CVs"
     range_select_mode = {"active": False}
     last_checked_idx = None
+    search_timer = None
 
     task_state = {"cancel": False, "running": False}
 
@@ -347,7 +354,7 @@ def main(page: ft.Page):
     def log_msg(msg, color="default"):
         cmap = {"default": "#cccccc", "black": "#cccccc", "blue": "#61afef", "green": "#98c379", "red": "#e06c75", "orange": "#e5c07b", "purple": "#c678dd"}
         logs_view.controls.append(ft.Text(f"> {msg}", color=cmap.get(color, color), size=13, font_family="monospace",selectable=True))
-        if len(logs_view.controls) > 500: logs_view.controls.pop(0)
+        if len(logs_view.controls) > MAX_LOG_LINES: logs_view.controls.pop(0)
         if current_nav_label == "Logs":
             try: logs_view.scroll_to(offset=-1, duration=50)
             except Exception: pass
@@ -555,7 +562,7 @@ def main(page: ft.Page):
                 time.sleep(0.2)
                 subprocess.run(["osascript", "-e", 'tell application "System Events" to set frontmost of process "qlmanage" to true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif platform.system() == "Windows": os.startfile(target_path)
-            else: subprocess.Popen(["xdg-open", target_path])
+            else: subprocess.Popen(["xdg-open", target_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e: log_msg(f"Failed to open preview: {e}", "red")
         
     def preview_cv_by_filename(fname):
@@ -577,8 +584,8 @@ def main(page: ft.Page):
         src_path = os.path.join(WORKSPACE_FOLDERS["SOURCE"], src_filename)
         if os.path.exists(src_path):
             if platform.system() == "Windows": os.startfile(src_path)
-            elif platform.system() == "Darwin": subprocess.Popen(["open", src_path])
-            else: subprocess.Popen(["xdg-open", src_path])
+            elif platform.system() == "Darwin": subprocess.Popen(["open", src_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else: subprocess.Popen(["xdg-open", src_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else: show_snack(f"Original file not found: {src_filename}")
 
     # ==========================================
@@ -660,7 +667,7 @@ def main(page: ft.Page):
                     while sample.state.name == "PROCESSING":
                         time.sleep(1)
                         _upload_wait += 1
-                        if _upload_wait > 300:
+                        if _upload_wait > FILE_UPLOAD_TIMEOUT_SEC:
                             raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(src_path)}")
                         sample = client.files.get(name=sample.name)
                     source_for_gemini = sample
@@ -799,7 +806,7 @@ def main(page: ft.Page):
                         while sample.state.name == "PROCESSING":
                             time.sleep(1)
                             upload_wait += 1
-                            if upload_wait > 300:
+                            if upload_wait > FILE_UPLOAD_TIMEOUT_SEC:
                                 raise TimeoutError(f"File upload timed out: {os.path.basename(src_path)}")
                             sample = client.files.get(name=sample.name)
                         resp_qa = client.models.generate_content(model=MODEL_NAME, contents=[sample, prompt])
@@ -1305,7 +1312,7 @@ def main(page: ft.Page):
     def handle_search(e):
         nonlocal search_timer
         if search_timer: search_timer.cancel()
-        search_timer = threading.Timer(0.2, render_table); search_timer.start()
+        search_timer = threading.Timer(SEARCH_DEBOUNCE_SEC, render_table); search_timer.start()
     search_input = ft.TextField(hint_text="Search", prefix_icon=ft.icons.SEARCH, on_change=handle_search, height=35, text_size=13, content_padding=ft.padding.only(left=10, right=10, top=5, bottom=5), expand=True)
     search_clear_btn = ft.IconButton(icon=ft.icons.CLOSE, on_click=lambda e: setattr(search_input, 'value', "") or render_table(), icon_size=16)
 

@@ -152,6 +152,8 @@ APP_VERSION = "03.55"
 # 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
 PRICE_1M_IN = 0.15
 PRICE_1M_OUT = 0.60
+FILE_UPLOAD_TIMEOUT_SEC = 300
+DOCX_SAVE_MAX_RETRIES = 20
 
 def get_resource_path(relative_path):
     if getattr(sys, 'frozen', False):
@@ -538,8 +540,8 @@ def init_workspace_folders(base_dir):
 def open_folder(path):
     if not os.path.exists(path): os.makedirs(path, exist_ok=True)
     if platform.system() == "Windows": os.startfile(path)
-    elif platform.system() == "Darwin": subprocess.Popen(["open", path])
-    else: subprocess.Popen(["xdg-open", path])
+    elif platform.system() == "Darwin": subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else: subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # ==========================================
 # 3. JSON SANITIZATION
@@ -1431,7 +1433,7 @@ def process_file_gemini(file_path, api_key, custom_instructions, task_state=None
             if task_state and task_state.get("cancel"): return None, 0, 0, 0.0
             time.sleep(1)
             upload_wait += 1
-            if upload_wait > 300:
+            if upload_wait > FILE_UPLOAD_TIMEOUT_SEC:
                 raise TimeoutError(f"File upload processing timed out after 5 minutes: {os.path.basename(file_path)}")
             sample = client.files.get(name=sample.name)
         if task_state and task_state.get("cancel"): return None, 0, 0, 0.0
@@ -1623,14 +1625,14 @@ def generate_docx_from_json(data, output_path, cfg):
         return output_path
     except PermissionError:
         base, ext = os.path.splitext(output_path)
-        for counter in range(1, 20):
+        for counter in range(1, DOCX_SAVE_MAX_RETRIES):
             target_path = f"{base}_{counter:02d}{ext}"
             try:
                 doc.save(target_path)
                 return target_path
             except PermissionError:
                 continue
-        raise PermissionError(f"Cannot save DOCX after 20 attempts: {output_path}")
+        raise PermissionError(f"Cannot save DOCX after {DOCX_SAVE_MAX_RETRIES} attempts: {output_path}")
 
 
 

@@ -34,6 +34,7 @@ def _retry_generate(client, model_name, contents):
 
 from cv_engine import (
     MODEL_NAME, PRICE_1M_IN, PRICE_1M_OUT, DEFAULT_PROMPTS, CV_JSON_SCHEMA,
+    FILE_UPLOAD_TIMEOUT_SEC,
     process_file_gemini, extract_text_from_docx, sanitize_json,
     generate_docx_from_json, smart_anonymize_data
 )
@@ -453,7 +454,7 @@ def run_batch_autofix_task(items, config, folders, task_state, db_files, cbs):
                         if task_state.get("cancel"): break
                         time.sleep(1)
                         _upload_wait += 1
-                        if _upload_wait > 300:
+                        if _upload_wait > FILE_UPLOAD_TIMEOUT_SEC:
                             raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(src_path)}")
                         sample = client.files.get(name=sample.name)
                     if task_state.get("cancel"): break
@@ -711,7 +712,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                     if task_state.get("cancel"): break
                                     time.sleep(1)
                                     _upload_wait += 1
-                                    if _upload_wait > 300:
+                                    if _upload_wait > FILE_UPLOAD_TIMEOUT_SEC:
                                         raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(path)}")
                                     sample = client.files.get(name=sample.name)
                                 if task_state.get("cancel"): break
@@ -1069,7 +1070,7 @@ def run_batch_qa_task(valid_candidates, sample_count, config, folders, task_stat
                                 break
                             time.sleep(1)
                             _upload_wait += 1
-                            if _upload_wait > 300:
+                            if _upload_wait > FILE_UPLOAD_TIMEOUT_SEC:
                                 raise TimeoutError(f"File upload timed out after 5 min: {os.path.basename(src_path)}")
                             sample = client.files.get(name=sample.name)
                         if task_state.get("cancel"):
