@@ -293,13 +293,8 @@ def main(page: ft.Page):
     current_filtered_items = []
     last_csv_count = 0
     current_nav_label = "CVs"
-    shift_pressed = False
+    range_select_mode = {"active": False}
     last_checked_idx = None
-
-    def on_keyboard_event(e):
-        nonlocal shift_pressed
-        shift_pressed = e.shift
-    page.on_keyboard_event = on_keyboard_event
 
     task_state = {"cancel": False, "running": False}
 
@@ -1014,6 +1009,27 @@ def main(page: ft.Page):
         render_table()
 
     master_checkbox = ft.Checkbox(value=False, on_change=handle_master_checkbox)
+
+    def toggle_range_select(e=None):
+        range_select_mode["active"] = not range_select_mode["active"]
+        if range_select_mode["active"]:
+            range_select_btn.icon_color = "blue"
+            range_select_btn.tooltip = "Range select ON — click last row to select range"
+        else:
+            range_select_btn.icon_color = ft.colors.with_opacity(0.4, ft.colors.ON_SURFACE)
+            range_select_btn.tooltip = "Select range (click to activate, then click last row)"
+        page.update()
+
+    range_select_btn = ft.IconButton(
+        icon=ft.icons.FORMAT_LIST_BULLETED,
+        icon_size=16,
+        icon_color=ft.colors.with_opacity(0.4, ft.colors.ON_SURFACE),
+        tooltip="Select range (click to activate, then click last row)",
+        on_click=toggle_range_select,
+        width=30, height=30,
+        style=ft.ButtonStyle(padding=ft.padding.all(4)),
+    )
+
     sort_icons = { i: ft.Icon(size=14, visible=False, color="blue") for i in range(1, 9) }
     
     def get_header_cell(label, width=None, expand=None, col_idx=None, center=False):
@@ -1043,14 +1059,18 @@ def main(page: ft.Page):
     def handle_checkbox_change(e, item_ref, idx):
         nonlocal last_checked_idx
         if task_state.get("running"): return
-        if shift_pressed and last_checked_idx is not None and last_checked_idx != idx:
+        if range_select_mode["active"] and last_checked_idx is not None and last_checked_idx != idx:
             lo, hi = sorted([last_checked_idx, idx])
             for i in range(lo, hi + 1):
                 if 0 <= i < len(current_filtered_items):
                     current_filtered_items[i]['selected'] = e.control.value
+            range_select_mode["active"] = False
+            range_select_btn.icon_color = ft.colors.with_opacity(0.4, ft.colors.ON_SURFACE)
+            range_select_btn.tooltip = "Select range (click to activate, then click last row)"
+            last_checked_idx = None
             render_table()
-        else:
-            item_ref['selected'] = e.control.value
+            return
+        item_ref['selected'] = e.control.value
         last_checked_idx = idx
         if current_filtered_items: master_checkbox.value = all(item.get('selected', False) for item in current_filtered_items)
         page.update()
@@ -1099,7 +1119,7 @@ def main(page: ft.Page):
 
         sc_c, sc_s, sc_f, sc_com = config.get("show_col_company", True), config.get("show_col_score", True), config.get("show_col_file", True), config.get("show_col_comments", True)
         
-        h_cells = [ft.Container(master_checkbox, width=40), get_header_cell("Name", expand=1, col_idx=1), get_header_cell("Role", expand=1, col_idx=2)]
+        h_cells = [ft.Container(ft.Row([master_checkbox, range_select_btn], spacing=0), width=65), get_header_cell("Name", expand=1, col_idx=1), get_header_cell("Role", expand=1, col_idx=2)]
         if sc_c: h_cells.append(get_header_cell("Company", expand=1, col_idx=7))
         if sc_s: h_cells.append(get_header_cell("Score", width=60, col_idx=8))
         if sc_f: h_cells.append(get_header_cell("File", width=200, col_idx=3))
@@ -1983,7 +2003,7 @@ def main(page: ft.Page):
             status_bar
         ], expand=True, spacing=0)
     )
-    
+
     log_msg(f"Workspace loaded: {config.get('workspace_path')}", "blue")
     update_nav_rail()
     update_billing_ui()
