@@ -1225,6 +1225,30 @@ def sanitize_json(data):
         clean_exp.append(job)
     data['experience'] = clean_exp
 
+    # Enrich skills from experience environments: collect unique items not already in skills
+    existing_skills_lower = set()
+    for items in data.get('skills', {}).values():
+        if isinstance(items, list):
+            existing_skills_lower.update(s.lower().strip() for s in items if isinstance(s, str))
+    env_skills = []
+    for job in data.get('experience', []):
+        for item in job.get('environment', []):
+            if isinstance(item, str) and item.strip():
+                if item.lower().strip() not in existing_skills_lower:
+                    env_skills.append(item.strip())
+                    existing_skills_lower.add(item.lower().strip())
+    if env_skills:
+        # Append to existing "Tools & Technologies" or create it
+        target_key = None
+        for k in data['skills']:
+            if k.lower() in ('tools & technologies', 'tools and technologies', 'technologies', 'tools'):
+                target_key = k
+                break
+        if target_key:
+            data['skills'][target_key].extend(env_skills)
+        else:
+            data['skills']['Tools & Technologies'] = env_skills
+
     if not isinstance(data.get('projects'), list): data['projects'] = []
     clean_projects = []
     for p in data['projects']:

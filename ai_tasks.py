@@ -779,6 +779,15 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                         raise
                                     fixed_data = sanitize_json(fixed_data)
 
+                                    # Lossless safety gate (same as batch autofix)
+                                    _base_m = lossless_metrics(data)
+                                    _new_m = lossless_metrics(fixed_data)
+                                    _min_chars = int(_base_m["char_count"] * 0.985)
+                                    _min_strs = max(0, _base_m["str_count"] - 1)
+                                    if (_new_m["str_count"] < _min_strs) or (_new_m["char_count"] < _min_chars):
+                                        cbs['log'](f"   ⚠️ Auto-Fix rejected: lossless gate (strs {_base_m['str_count']}→{_new_m['str_count']}, chars {_base_m['char_count']}→{_new_m['char_count']}). Keeping original.", "red")
+                                        raise ValueError("lossless gate blocked autofix")
+
                                     # Re-QA the fixed data to verify it actually improved
                                     try:
                                         cbs['log'](f"   🔬 [Re-QA] Verifying fix quality...", "blue")
