@@ -328,12 +328,30 @@ def main(page: ft.Page):
     )
     stopping_indicator = ft.Text("⏳ Stopping...", color="#e5c07b", size=12, visible=False, weight=ft.FontWeight.BOLD)
 
+    api_lamp = ft.Container(width=14, height=14, border_radius=7, bgcolor=None, visible=False,
+                            tooltip="API status")
+
+    def _on_api_status(status):
+        if status == 'waiting':
+            api_lamp.bgcolor = "#e06c75"  # red
+            api_lamp.visible = True
+        elif status == 'done':
+            api_lamp.bgcolor = "#98c379"  # green
+            api_lamp.visible = True
+        else:
+            api_lamp.visible = False
+        try: page.update()
+        except Exception: pass
+
+    from ai_tasks import set_api_status_callback
+    set_api_status_callback(_on_api_status)
+
     status_bar = ft.Container(
         bgcolor="#3F4651", height=40, padding=ft.padding.symmetric(horizontal=15),
         content=ft.Row([
             ft.Container(content=ft.Row([global_task_progress_bar, global_task_status_text]), width=400),
             ft.Container(expand=True),
-            ft.Row([stopping_indicator, btn_global_stop, ft.Container(width=10), ft.Icon("account_balance_wallet", color="white", size=14), billing_status_text])
+            ft.Row([stopping_indicator, btn_global_stop, ft.Container(width=10), api_lamp, ft.Container(width=4), ft.Icon("account_balance_wallet", color="white", size=14), billing_status_text])
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
     )
 

@@ -15,12 +15,26 @@ from google.genai import types as genai_types
 from cv_engine import _make_genai_client
 
 
+_api_status_cb = None
+
+def set_api_status_callback(cb):
+    """Set a callback to be called with 'waiting'/'done'/'idle' on API state changes."""
+    global _api_status_cb
+    _api_status_cb = cb
+
 def _retry_generate(client, model_name, contents):
     max_retries = 3
     delay = 5
+    if _api_status_cb:
+        try: _api_status_cb('waiting')
+        except Exception: pass
     for attempt in range(max_retries):
         try:
-            return client.models.generate_content(model=model_name, contents=contents)
+            result = client.models.generate_content(model=model_name, contents=contents)
+            if _api_status_cb:
+                try: _api_status_cb('done')
+                except Exception: pass
+            return result
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "Resource exhausted" in err_str or "Quota" in err_str:
@@ -28,15 +42,22 @@ def _retry_generate(client, model_name, contents):
                     print(f"⚠️ API 429 Limit hit. Sleeping for {delay} seconds... (Attempt {attempt+1}/{max_retries})")
                     time.sleep(delay)
                 else:
+                    if _api_status_cb:
+                        try: _api_status_cb('done')
+                        except Exception: pass
                     raise e
             else:
+                if _api_status_cb:
+                    try: _api_status_cb('done')
+                    except Exception: pass
                 raise e
 
 from cv_engine import (
     MODEL_NAME, PRICE_1M_IN, PRICE_1M_OUT, DEFAULT_PROMPTS, CV_JSON_SCHEMA,
     FILE_UPLOAD_TIMEOUT_SEC,
     process_file_gemini, extract_text_from_docx, sanitize_json,
-    generate_docx_from_json, smart_anonymize_data
+    generate_docx_from_json, smart_anonymize_data,
+    translate_locations_via_llm, translate_dates_via_llm
 )
 
 # ==========================================
@@ -808,6 +829,20 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                                     cbs['log'](f"   ✅ [Auto-QA] Perfect extraction (100/100).", "green")
                         except Exception as e:
                             cbs['log'](f"   ❌ Auto-QA/Fix failed during import: {e}", "red")
+
+                    # Translate non-English dates and locations via LLM
+                    try:
+                        date_changes = translate_dates_via_llm(data, api_key)
+                        if date_changes:
+                            cbs['log'](f"   📅 Translated dates: {', '.join(date_changes)}", "blue")
+                    except Exception:
+                        pass
+                    try:
+                        loc_changes = translate_locations_via_llm(data, api_key)
+                        if loc_changes:
+                            cbs['log'](f"   🌍 Translated locations: {', '.join(loc_changes)}", "blue")
+                    except Exception:
+                        pass
 
                     with open(target_json_path, 'w', encoding='utf-8') as jf:
                         json.dump(data, jf, indent=2, ensure_ascii=False)

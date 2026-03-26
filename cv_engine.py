@@ -100,11 +100,19 @@ def _make_genai_client(api_key: str) -> genai.Client:
 # 🛡️ GLOBAL API RETRY HELPER (429 ERROR FIX)
 # ==========================================
 def _retry_generate(client, model_name, contents):
+    from ai_tasks import _api_status_cb
     max_retries = 3
     delay = 5
+    if _api_status_cb:
+        try: _api_status_cb('waiting')
+        except Exception: pass
     for attempt in range(max_retries):
         try:
-            return client.models.generate_content(model=model_name, contents=contents)
+            result = client.models.generate_content(model=model_name, contents=contents)
+            if _api_status_cb:
+                try: _api_status_cb('done')
+                except Exception: pass
+            return result
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "Resource exhausted" in err_str or "Quota" in err_str:
@@ -112,8 +120,14 @@ def _retry_generate(client, model_name, contents):
                     print(f"⚠️ API 429 Limit hit. Sleeping for {delay} seconds... (Attempt {attempt+1}/{max_retries})")
                     time.sleep(delay)
                 else:
+                    if _api_status_cb:
+                        try: _api_status_cb('done')
+                        except Exception: pass
                     raise e
             else:
+                if _api_status_cb:
+                    try: _api_status_cb('done')
+                    except Exception: pass
                 raise e
 # ==========================================
 
@@ -904,59 +918,96 @@ CANONICAL_SECTION_TITLES = {
     "links", "ссылки",
 }
 
-_MONTH_RU_TO_EN = {
-    "январь": "January", "января": "January", "янв": "January",
-    "февраль": "February", "февраля": "February", "фев": "February",
-    "март": "March", "марта": "March", "мар": "March",
-    "апрель": "April", "апреля": "April", "апр": "April",
-    "май": "May", "мая": "May",
-    "июнь": "June", "июня": "June", "июн": "June",
-    "июль": "July", "июля": "July", "июл": "July",
-    "август": "August", "августа": "August", "авг": "August",
-    "сентябрь": "September", "сентября": "September", "сен": "September",
-    "октябрь": "October", "октября": "October", "окт": "October",
-    "ноябрь": "November", "ноября": "November", "ноя": "November",
-    "декабрь": "December", "декабря": "December", "дек": "December",
-    # Other common languages
-    "enero": "January", "febrero": "February", "marzo": "March",
-    "abril": "April", "mayo": "May", "junio": "June",
-    "julio": "July", "agosto": "August", "septiembre": "September",
-    "octubre": "October", "noviembre": "November", "diciembre": "December",
-    "januar": "January", "februar": "February", "märz": "March",
-    "juni": "June", "juli": "July", "oktober": "October",
-    "dezember": "December",
-    "janvier": "January", "février": "February", "mars": "March",
-    "avril": "April", "mai": "May", "juin": "June",
-    "juillet": "July", "août": "August", "septembre": "September",
-    "octobre": "October", "novembre": "November", "décembre": "December",
-}
 
-_DATE_KEYWORDS_RU = {
-    "по настоящее время": "Present", "настоящее время": "Present",
-    "н.в.": "Present", "наст. время": "Present",
-    "по наст. время": "Present", "текущий": "Present",
-}
 
-def _normalize_date_to_english(s):
-    """Translate non-English month names and keywords to English."""
-    if not isinstance(s, str) or not s.strip():
-        return s
-    result = s.strip()
-    low = result.lower()
-    # Check full keyword replacements first
-    for ru, en in _DATE_KEYWORDS_RU.items():
-        if ru in low:
-            return en
-    # Replace month names
-    for foreign, english in _MONTH_RU_TO_EN.items():
-        pattern = re.compile(r'\b' + re.escape(foreign) + r'\b', re.IGNORECASE)
-        if pattern.search(result):
-            result = pattern.sub(english, result)
-            break
-    return result
 
-def _normalize_dates_in_data(data):
-    """Walk experience/education/certifications and normalize all date strings and locations to English."""
+
+
+def _has_non_ascii(s):
+    """Return True if string contains non-ASCII characters (likely non-English)."""
+    return bool(s) and any(ord(c) > 127 for c in s)
+
+
+def translate_locations_via_llm(data, api_key):
+    """Translate all non-English locations in CV data to English via a single LLM call.
+    Modifies data in-place. Returns list of translations made (for logging)."""
+    if not api_key or not isinstance(data, dict):
+        return []
+
+    # Collect all location values with their paths
+    locs = {}  # original_text -> list of (obj, key) paths
+
+    # basics.location
+    bl = data.get('basics', {}).get('location', '')
+    if isinstance(bl, str) and _has_non_ascii(bl):
+        locs.setdefault(bl.strip(), []).append((data['basics'], 'location'))
+
+    # contacts.location
+    contacts = data.get('basics', {}).get('contacts', {})
+    if isinstance(contacts, dict):
+        cl = contacts.get('location', '')
+        if isinstance(cl, str) and _has_non_ascii(cl):
+            locs.setdefault(cl.strip(), []).append((contacts, 'location'))
+
+    # experience[].location
+    for job in data.get('experience', []):
+        jl = job.get('location', '')
+        if isinstance(jl, str) and _has_non_ascii(jl):
+            locs.setdefault(jl.strip(), []).append((job, 'location'))
+
+    # education[].institution (may contain city)
+    for edu in data.get('education', []):
+        for k in ('location', 'details'):
+            el = edu.get(k, '')
+            if isinstance(el, str) and _has_non_ascii(el):
+                locs.setdefault(el.strip(), []).append((edu, k))
+
+    if not locs:
+        return []
+
+    # Build a single prompt with all unique locations
+    unique_locs = list(locs.keys())
+    numbered = "\n".join(f"{i+1}. {loc}" for i, loc in enumerate(unique_locs))
+
+    prompt = (
+        "Translate the following location names to US English. "
+        "Return ONLY a JSON array of translated strings in the same order. "
+        "Keep the original comma-separated structure (city, country). "
+        "If already in English, return as-is.\n\n"
+        f"{numbered}"
+    )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+        txt = (getattr(resp, 'text', '') or '').strip()
+        txt = txt.replace('```json', '').replace('```', '').strip()
+        translated = json.loads(txt)
+
+        if not isinstance(translated, list) or len(translated) != len(unique_locs):
+            return []
+
+        changes = []
+        for orig, eng in zip(unique_locs, translated):
+            eng = str(eng).strip()
+            if eng and eng != orig:
+                for obj, key in locs[orig]:
+                    obj[key] = eng
+                changes.append(f"{orig} → {eng}")
+        return changes
+    except Exception:
+        return []
+
+
+def translate_dates_via_llm(data, api_key):
+    """Translate all non-English dates in CV data to English via a single LLM call.
+    Modifies data in-place. Returns list of translations made (for logging)."""
+    if not api_key or not isinstance(data, dict):
+        return []
+
+    # Collect all date values with their paths
+    dates_map = {}  # original_text -> list of (obj, key) paths
+
     for section_key in ('experience', 'education', 'certifications'):
         items = data.get(section_key)
         if not isinstance(items, list):
@@ -967,97 +1018,50 @@ def _normalize_dates_in_data(data):
             dates = item.get('dates')
             if isinstance(dates, dict):
                 for k in ('start', 'end'):
-                    if isinstance(dates.get(k), str):
-                        dates[k] = _normalize_date_to_english(dates[k])
+                    v = dates.get(k, '')
+                    if isinstance(v, str) and _has_non_ascii(v):
+                        dates_map.setdefault(v.strip(), []).append((dates, k))
             for k in ('date', 'period', 'year'):
-                if isinstance(item.get(k), str):
-                    item[k] = _normalize_date_to_english(item[k])
-            if isinstance(item.get('location'), str):
-                item['location'] = _normalize_location_to_english(item['location'])
+                v = item.get(k, '')
+                if isinstance(v, str) and _has_non_ascii(v):
+                    dates_map.setdefault(v.strip(), []).append((item, k))
 
-_LOCATION_RU_TO_EN = {
-    # Countries
-    "россия": "Russia", "армения": "Armenia", "грузия": "Georgia",
-    "украина": "Ukraine", "беларусь": "Belarus", "белоруссия": "Belarus",
-    "казахстан": "Kazakhstan", "узбекистан": "Uzbekistan",
-    "кыргызстан": "Kyrgyzstan", "азербайджан": "Azerbaijan",
-    "молдова": "Moldova", "молдавия": "Moldova",
-    "латвия": "Latvia", "литва": "Lithuania", "эстония": "Estonia",
-    "германия": "Germany", "франция": "France", "испания": "Spain",
-    "италия": "Italy", "нидерланды": "Netherlands", "голландия": "Netherlands",
-    "великобритания": "United Kingdom", "англия": "England",
-    "швейцария": "Switzerland", "австрия": "Austria",
-    "польша": "Poland", "чехия": "Czech Republic", "венгрия": "Hungary",
-    "румыния": "Romania", "болгария": "Bulgaria", "сербия": "Serbia",
-    "хорватия": "Croatia", "словения": "Slovenia", "словакия": "Slovakia",
-    "греция": "Greece", "турция": "Turkey", "кипр": "Cyprus",
-    "израиль": "Israel", "оаэ": "UAE", "сша": "USA",
-    "канада": "Canada", "австралия": "Australia",
-    "япония": "Japan", "китай": "China", "индия": "India",
-    "южная корея": "South Korea", "сингапур": "Singapore",
-    "таиланд": "Thailand", "вьетнам": "Vietnam",
-    "бразилия": "Brazil", "аргентина": "Argentina", "мексика": "Mexico",
-    "португалия": "Portugal", "финляндия": "Finland", "швеция": "Sweden",
-    "норвегия": "Norway", "дания": "Denmark", "ирландия": "Ireland",
-    "бельгия": "Belgium", "люксембург": "Luxembourg",
-    # Cities
-    "москва": "Moscow", "санкт-петербург": "Saint Petersburg",
-    "новосибирск": "Novosibirsk", "екатеринбург": "Yekaterinburg",
-    "казань": "Kazan", "нижний новгород": "Nizhny Novgorod",
-    "самара": "Samara", "ростов-на-дону": "Rostov-on-Don",
-    "краснодар": "Krasnodar", "воронеж": "Voronezh",
-    "пермь": "Perm", "волгоград": "Volgograd",
-    "красноярск": "Krasnoyarsk", "томск": "Tomsk", "омск": "Omsk",
-    "уфа": "Ufa", "челябинск": "Chelyabinsk", "тюмень": "Tyumen",
-    "ереван": "Yerevan", "тбилиси": "Tbilisi", "баку": "Baku",
-    "киев": "Kyiv", "харьков": "Kharkiv", "одесса": "Odessa",
-    "львов": "Lviv", "днепр": "Dnipro",
-    "минск": "Minsk", "алматы": "Almaty", "астана": "Astana",
-    "ташкент": "Tashkent", "бишкек": "Bishkek",
-    "кишинёв": "Chisinau", "кишинев": "Chisinau",
-    "рига": "Riga", "вильнюс": "Vilnius", "таллин": "Tallinn",
-    "берлин": "Berlin", "мюнхен": "Munich", "гамбург": "Hamburg",
-    "париж": "Paris", "лион": "Lyon", "марсель": "Marseille",
-    "мадрид": "Madrid", "барселона": "Barcelona",
-    "рим": "Rome", "милан": "Milan",
-    "амстердам": "Amsterdam", "лондон": "London",
-    "вена": "Vienna", "цюрих": "Zurich", "женева": "Geneva",
-    "варшава": "Warsaw", "прага": "Prague", "будапешт": "Budapest",
-    "бухарест": "Bucharest", "софия": "Sofia", "белград": "Belgrade",
-    "загреб": "Zagreb", "любляна": "Ljubljana",
-    "афины": "Athens", "стамбул": "Istanbul", "анкара": "Ankara",
-    "тель-авив": "Tel Aviv", "иерусалим": "Jerusalem",
-    "дубай": "Dubai", "абу-даби": "Abu Dhabi",
-    "нью-йорк": "New York", "лос-анджелес": "Los Angeles",
-    "сан-франциско": "San Francisco",
-    "торонто": "Toronto", "монреаль": "Montreal", "ванкувер": "Vancouver",
-    "сидней": "Sydney", "мельбурн": "Melbourne",
-    "токио": "Tokyo", "пекин": "Beijing", "шанхай": "Shanghai",
-    "мумбаи": "Mumbai", "бангалор": "Bangalore",
-    "сеул": "Seoul", "бангкок": "Bangkok",
-    "лиссабон": "Lisbon", "хельсинки": "Helsinki",
-    "стокгольм": "Stockholm", "осло": "Oslo", "копенгаген": "Copenhagen",
-    "дублин": "Dublin", "брюссель": "Brussels",
-}
+    if not dates_map:
+        return []
 
-def _normalize_location_to_english(loc):
-    """Translate common non-English location names to English."""
-    if not isinstance(loc, str) or not loc.strip():
-        return loc
-    result = loc.strip()
-    # Check if any non-ASCII Cyrillic present
-    if not any('\u0400' <= c <= '\u04ff' for c in result):
-        return result
-    # Split by comma and translate each part
-    parts = [p.strip() for p in result.split(',')]
-    translated = []
-    for part in parts:
-        low = part.lower().strip()
-        if low in _LOCATION_RU_TO_EN:
-            translated.append(_LOCATION_RU_TO_EN[low])
-        else:
-            translated.append(part)
-    return ", ".join(translated)
+    unique_dates = list(dates_map.keys())
+    numbered = "\n".join(f"{i+1}. {d}" for i, d in enumerate(unique_dates))
+
+    prompt = (
+        "Translate the following date strings to US English. "
+        "Use format like 'January 2023', '03/2020', 'Present' etc. "
+        "If a date means 'current/now/present', translate as 'Present'. "
+        "Return ONLY a JSON array of translated strings in the same order. "
+        "If already in English, return as-is.\n\n"
+        f"{numbered}"
+    )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+        txt = (getattr(resp, 'text', '') or '').strip()
+        txt = txt.replace('```json', '').replace('```', '').strip()
+        translated = json.loads(txt)
+
+        if not isinstance(translated, list) or len(translated) != len(unique_dates):
+            return []
+
+        changes = []
+        for orig, eng in zip(unique_dates, translated):
+            eng = str(eng).strip()
+            if eng and eng != orig:
+                for obj, key in dates_map[orig]:
+                    obj[key] = eng
+                changes.append(f"{orig} → {eng}")
+        return changes
+    except Exception:
+        return []
+
 
 def _is_future_date(s):
     """Return True if date string represents a month/year clearly in the future."""
@@ -1079,7 +1083,6 @@ def _is_future_date(s):
 def sanitize_json(data):
     if not isinstance(data, dict): data = {}
     data = _strip_leading_list_markers_deep(data)
-    _normalize_dates_in_data(data)
 
     backup_keys = {k: data.get(k) for k in ['qa_audit', 'match_analysis', '_source_filename', '_source_hash', 'import_date', '_comment']}
 
@@ -1092,16 +1095,9 @@ def sanitize_json(data):
                 cleaned_val = val.strip().replace('\n', ' ').replace('\r', '')
                 if key == 'name' and cleaned_val:
                     if cleaned_val.isupper() or cleaned_val.islower(): cleaned_val = cleaned_val.title()
-                if key == 'location' and cleaned_val:
-                    cleaned_val = _normalize_location_to_english(cleaned_val)
                 data['basics'][key] = "" if cleaned_val.lower() in bad_values else cleaned_val
             else: 
                 data['basics'][key] = ", ".join(map(str, val)) if isinstance(val, list) else (str(val) if val else "")
-
-    # Normalize location inside contacts dict too (LinkedIn puts it there)
-    contacts = data['basics'].get('contacts')
-    if isinstance(contacts, dict) and isinstance(contacts.get('location'), str):
-        contacts['location'] = _normalize_location_to_english(contacts['location'])
 
     raw_title = data['basics'].get('current_title', '')
     if isinstance(raw_title, str):
