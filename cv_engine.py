@@ -218,7 +218,7 @@ DEFAULT_PROMPTS = {
 
 **CRITICAL RULES FOR LOSSLESS EXTRACTION (STRICTLY ENFORCED):**
 1. **US ENGLISH ONLY:** All human-readable output in the JSON must be translated into professional US English. Do not leave Russian or other non-English prose in the output.
-2. **NO INVENTED FACTS / NO DATA LOSS:** Extract only facts supported by the CV, but do not lose explicit information. Preserve meaningful technical terms, methods, tools, technologies, responsibilities, achievements, project details, and bullet points.
+2. **NO INVENTED FACTS / NO DATA LOSS:** Extract only facts supported by the CV, but do not lose explicit information. Preserve meaningful technical terms, methods, tools, technologies, responsibilities, achievements, project details, and bullet points. **HIGHLIGHTS INTEGRITY:** Each item in a role's `highlights` array MUST correspond to an actual bullet point, responsibility, or achievement explicitly written in the source CV for that role. NEVER generate, rephrase into new meaning, or fabricate highlights. If a role has no bullets or descriptions in the source, return an empty `highlights: []`.
 3. **DEEP SCAN THE ENTIRE CV:** Extract from the whole document, including header, summary, skills blocks, Top Skills, experience bullets, project descriptions, certifications, languages, links, and side sections.
 4. **SKILLS & ENVIRONMENT:** Extract explicit skills, tools, technologies, frameworks, platforms, databases, cloud/services, and domain systems from all relevant sections. Put them into `skills` or role `environment` as appropriate. Do not create noisy or redundant generic skill categories.
 5. **DATES & CURRENT STATUS:** Extract all explicit dates from all sections, preserving the highest precision supported by the source (`April 2025`, `2018`, `Present`). If only a duration is available with no start/end dates (e.g. `6 years 5 months`), place it in `dates.start` and leave `dates.end` empty. Never invent dates. Never assign future dates to finished past roles.
@@ -233,6 +233,7 @@ DEFAULT_PROMPTS = {
 - all human-readable text is in US English
 - no explicit facts were lost
 - no unsupported facts were invented
+- every highlight in each role traces back to actual text in the source CV for that role
 - no `None` or `null` appears
 - skills from Top Skills / bullets / environment / responsibilities were not missed
 - dates are preserved exactly as supported by the source; duration-only entries (e.g. `6 years 5 months`) are in `dates.start`
@@ -280,9 +281,10 @@ QA AUDIT REPORT (ERRORS TO FIX):
 INSTRUCTIONS:
 1. Look at the original attached CV file/text.
 2. Fix ONLY the missing data or hallucinations mentioned in the QA report.
-3. Maintain the EXACT same JSON schema as the CURRENT JSON. 
+3. Maintain the EXACT same JSON schema as the CURRENT JSON.
 4. Do NOT remove any existing correct data.
-5. Return ONLY the repaired JSON object without markdown wrappers.""",
+5. Do NOT add new highlights, achievements, or responsibilities that are not explicitly present in the original CV. Only restore text that was missed during extraction.
+6. Return ONLY the repaired JSON object without markdown wrappers.""",
 
     "prompt_matcher": """Act as a Senior IT Recruiter. Evaluate the candidate against the Job Description.
 CRITICAL: Carefully analyze their actual 'experience' (duration, context, tools used), not just the 'skills' list.
