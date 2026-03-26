@@ -709,7 +709,7 @@ def _strip_leading_list_marker_text(s: str) -> str:
     # Normalize NBSP that often appears after copied bullets.
     s = s.replace(" ", " ")
     # Repeated marker sequences like "• • AWS" / "-- item" / "— item"
-    return re.sub(r'^\s*(?:[•●■▪▫◦‣⁃∙·*\-–—]+\s*)+', '', s)
+    return re.sub(r'^\s*(?:[•●■▪▫◦‣⁃∙·*\-–—►▸▶➤➜❯❱→✦✧◆◇]+\s*)+', '', s)
 
 
 def _strip_leading_list_markers_deep(obj):
@@ -731,7 +731,7 @@ def _normalize_human_language(name: str) -> str:
     if not s:
         return ""
     # remove leading bullets and punctuation
-    s = re.sub(r"^[\s•●■▪▫◦‣⁃∙·–—\-]+", "", s).strip()
+    s = re.sub(r"^[\s•●■▪▫◦‣⁃∙·–—\-►▸▶➤➜❯❱→✦✧◆◇]+", "", s).strip()
     # drop CEFR / level in parentheses or after dash, e.g. "English (C1)" / "English - C1"
     s = re.sub(r"\([^)]*\)", "", s).strip()
     s = re.sub(r"\s*[-–—]\s*(A1|A2|B1|B2|C1|C2|Native|Fluent|Advanced|Intermediate|Beginner)\b.*$", "", s, flags=re.I).strip()
