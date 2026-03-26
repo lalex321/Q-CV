@@ -1111,11 +1111,22 @@ def sanitize_json(data):
             
     data['basics']['current_title_original'] = raw_title
             
+    _title_role_kw = {'engineer', 'manager', 'developer', 'analyst', 'designer', 'architect',
+                      'lead', 'director', 'consultant', 'specialist', 'scientist', 'officer',
+                      'coordinator', 'executive', 'head', 'vp', 'president', 'intern', 'sdet',
+                      'administrator', 'researcher', 'devops', 'founder', 'partner', 'cto', 'ceo'}
     clean_title = raw_title
     if clean_title:
             # Strip common prefixes that LLM sometimes prepends
             clean_title = re.sub(r'^(Objective|Summary|Profile|About)\s*:\s*', '', clean_title, flags=re.IGNORECASE).strip()
-            clean_title = re.split(r'\s*\|\s*|\s*-\s*|\s*,\s*|\s+at\s+|\s+@\s+', clean_title, flags=re.IGNORECASE)[0].strip()
+            segments = re.split(r'\s*\|\s*|\s*-\s*|\s*,\s*|\s+at\s+|\s+@\s+', clean_title, flags=re.IGNORECASE)
+            # Pick the first segment that looks like a job title; fall back to first segment
+            clean_title = segments[0].strip()
+            for seg in segments:
+                seg = seg.strip()
+                if seg and any(kw in seg.lower() for kw in _title_role_kw):
+                    clean_title = seg
+                    break
             if clean_title.isupper(): clean_title = clean_title.title()
             if len(clean_title) > 80 or len(clean_title) < 2: clean_title = ""
             # Reject sentence-like text (objective/summary leaked into title)
@@ -1124,10 +1135,7 @@ def sanitize_json(data):
 
     # If title looks like a location (e.g. "Bay Area/San Diego") rather than a job title, discard it
     if clean_title and '/' in clean_title:
-        _title_kw = {'engineer', 'manager', 'developer', 'analyst', 'designer', 'architect',
-                     'lead', 'director', 'consultant', 'specialist', 'scientist', 'officer',
-                     'coordinator', 'executive', 'head', 'vp', 'president', 'intern', 'sdet'}
-        if not any(kw in clean_title.lower() for kw in _title_kw):
+        if not any(kw in clean_title.lower() for kw in _title_role_kw):
             clean_title = ""
 
     if not clean_title and data.get('experience'):
