@@ -1131,9 +1131,16 @@ def sanitize_json(data):
             clean_title = ""
 
     if not clean_title and data.get('experience'):
-            fb = str(data['experience'][0].get('role', '')).replace('\n', ' ').strip()
+            role_raw = data['experience'][0].get('role')
+            fb = str(role_raw).replace('\n', ' ').strip() if role_raw else ''
+            if fb.lower() in bad_values: fb = ''
             if fb.isupper(): fb = ' '.join(w if (w.isupper() and len(w) <= 4) else w.capitalize() for w in fb.split())
             if fb: clean_title = fb
+    # Last resort: use objective if it looks like a job title (short, no sentences)
+    if not clean_title:
+            obj = data['basics'].get('objective', '')
+            if isinstance(obj, str) and 0 < len(obj) <= 80 and not re.search(r'\b(years?\s+of|experience\s+in)\b', obj, re.IGNORECASE):
+                clean_title = obj
             
     data['basics']['current_title'] = clean_title
 
