@@ -161,7 +161,7 @@ fix_docx_path_bug()
 # ==========================================
 
 MODEL_NAME = 'gemini-2.0-flash'
-APP_VERSION = "03.55"
+APP_VERSION = "03.56"
 
 # 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
 PRICE_1M_IN = 0.15
