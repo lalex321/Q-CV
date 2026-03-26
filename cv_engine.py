@@ -221,7 +221,7 @@ DEFAULT_PROMPTS = {
 2. **NO INVENTED FACTS / NO DATA LOSS:** Extract only facts supported by the CV, but do not lose explicit information. Preserve meaningful technical terms, methods, tools, technologies, responsibilities, achievements, project details, and bullet points. **HIGHLIGHTS INTEGRITY:** Each item in a role's `highlights` array MUST correspond to an actual bullet point, responsibility, or achievement explicitly written in the source CV for that role. NEVER generate, rephrase into new meaning, or fabricate highlights. If a role has no bullets or descriptions in the source, return an empty `highlights: []`.
 3. **DEEP SCAN THE ENTIRE CV:** Extract from the whole document, including header, summary, skills blocks, Top Skills, experience bullets, project descriptions, certifications, languages, links, and side sections.
 4. **SKILLS & ENVIRONMENT:** Extract explicit skills, tools, technologies, frameworks, platforms, databases, cloud/services, and domain systems from all relevant sections. Put them into `skills` or role `environment` as appropriate. Do not create noisy or redundant generic skill categories.
-5. **DATES & CURRENT STATUS:** Extract all explicit dates from all sections, preserving the highest precision supported by the source (`April 2025`, `2018`, `Present`). If only a duration is available with no start/end dates (e.g. `6 years 5 months`), place it in `dates.start` and leave `dates.end` empty. Never invent dates. Never assign future dates to finished past roles.
+5. **DATES & CURRENT STATUS:** Extract all explicit dates from ALL sections including education, preserving the highest precision supported by the source (`April 2025`, `2018`, `Present`). Education years (e.g. `2012 - 2016`) MUST go into `education[].year`. If only a duration is available with no start/end dates (e.g. `6 years 5 months`), place it in `dates.start` and leave `dates.end` empty. Never invent dates. Never assign future dates to finished past roles.
 6. **CONTACTS, LINKS, LOCATIONS:** Extract all explicit phone numbers, emails, LinkedIn, GitHub, portfolio, websites, WhatsApp, and other links, plus the most granular explicit location. Do not infer location from vague context or company headquarters.
 7. **WORK EXPERIENCE INTEGRITY:** Merge all employment history into the single `experience` array, even if the CV splits it into multiple employment sections. Preserve explicit company, role title, dates, location, highlights, responsibilities, achievements, project details, and environment. Do not split one role unless clearly shown. Do not duplicate roles. Do not confuse role title with company name. If a role has only a duration (e.g. `6 years 5 months`) but no start/end dates, put the duration string into `dates.start` and leave `dates.end` as `""`.
 8. **CURRENT TITLE & NAME NORMALIZATION:** Preserve `basics.current_title` as close as possible to the resume header wording. Extract the real display name if explicit; if not, and the email clearly contains a safe `firstname.lastname` pattern, normalize it into a human-readable name. Do not invent beyond that.
@@ -247,7 +247,7 @@ NOTE: The JSON is generated programmatically. It purposefully forces skill categ
 EXTRACTED JSON:
 {json_str}
 
-TASK: Find ONLY real data losses or hallucinations. 
+TASK: Find ONLY real data losses or hallucinations. Pay special attention to education years/dates — if the original CV contains graduation years or date ranges for education entries, they MUST be present in the JSON `education[].year` field.
 You MUST end your response with a JSON block in this EXACT format:
 ```json
 {"score": 95, "missing": ["Skill 1", "Missing Date"], "hallucinations": ["Fake Certification"]}
@@ -284,7 +284,8 @@ INSTRUCTIONS:
 3. Maintain the EXACT same JSON schema as the CURRENT JSON.
 4. Do NOT remove any existing correct data.
 5. Do NOT add new highlights, achievements, or responsibilities that are not explicitly present in the original CV. Only restore text that was missed during extraction.
-6. Return ONLY the repaired JSON object without markdown wrappers.""",
+6. Place restored data into its CORRECT schema location. Education years go into `education[].year`, not into `other_sections`. Degrees go into `education[].degree`, not elsewhere.
+7. Return ONLY the repaired JSON object without markdown wrappers.""",
 
     "prompt_matcher": """Act as a Senior IT Recruiter. Evaluate the candidate against the Job Description.
 CRITICAL: Carefully analyze their actual 'experience' (duration, context, tools used), not just the 'skills' list.
@@ -1409,6 +1410,38 @@ def sanitize_json(data):
         if title in CANONICAL_SECTION_TITLES:
             continue
         filtered_other.append(sec)
+
+    # Rescue orphaned education years from other_sections into education[].year
+    # Autofix sometimes puts years like "(2012 - 2016)" into other_sections instead of education
+    _year_re = re.compile(r'\(?\s*(\d{4})\s*[-–—]\s*(\d{4})\s*\)?$')
+    edu_list = data.get('education', [])
+    if edu_list:
+        rescued_items = set()
+        for sec in filtered_other:
+            for idx, item in enumerate(sec.get('items', [])):
+                m = _year_re.match(item.strip())
+                if not m:
+                    continue
+                year_str = f"{m.group(1)} - {m.group(2)}"
+                # Find an education entry with empty year
+                for edu in edu_list:
+                    if not edu.get('year'):
+                        edu['year'] = year_str
+                        rescued_items.add((id(sec), idx))
+                        break
+        # Remove rescued items from other_sections
+        if rescued_items:
+            new_filtered = []
+            for sec in filtered_other:
+                new_items = [item for idx, item in enumerate(sec.get('items', []))
+                             if (id(sec), idx) not in rescued_items]
+                if new_items or sec.get('title'):
+                    sec['items'] = new_items
+                    if new_items:
+                        new_filtered.append(sec)
+                else:
+                    pass  # drop empty section
+            filtered_other = new_filtered
 
     data['other_sections'] = filtered_other
 
