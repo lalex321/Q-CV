@@ -243,6 +243,7 @@ DEFAULT_PROMPTS = {
 
     "prompt_qa": """Act as a strict QA Auditor for a recruitment agency. Compare the original attached CV with this extracted JSON.
 NOTE: The JSON is generated programmatically. It purposefully forces skill categorization, infers standard job titles if missing, and standardizes empty fields to "". Do NOT report these architectural features as hallucinations.
+NOTE: The pipeline TRANSLATES all content to US English. If the original CV is in Russian, Chinese, or any other language, the JSON will contain the English translation. This is EXPECTED behavior — do NOT flag translated content as missing or hallucinated. Compare meaning, not language.
 
 EXTRACTED JSON:
 {json_str}

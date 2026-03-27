@@ -1436,22 +1436,20 @@ def main(page: ft.Page):
     qa_btn_copy = ft.IconButton(icon=ft.icons.COPY, tooltip="Copy summary to Clipboard", on_click=lambda e: page.set_clipboard(qa_result_md.value) or show_snack("Copied!"), disabled=True)
     qa_result_md = ft.Markdown("", selectable=True, extension_set="gitHubWeb", visible=False)
 
-    qa_results_table = ft.DataTable(
-        columns=[],
-        rows=[],
-        column_spacing=24,
-        heading_row_height=44,
-        data_row_min_height=44,
-        data_row_max_height=56,
-        expand=True,
+    qa_header_row = ft.Container(
+        content=ft.Row([], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+        bgcolor=ft.colors.with_opacity(0.05, ft.colors.ON_SURFACE),
+        padding=ft.padding.only(left=10, right=20, top=6, bottom=6),
+        border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.1, ft.colors.ON_SURFACE))),
     )
+    qa_list_view = ft.ListView(expand=True, spacing=0)
     qa_results_title = ft.Text("QA Results", weight="bold", visible=False)
     qa_table_box = ft.Container(
         visible=False,
         border=ft.border.all(1, "#eeeeee"),
         border_radius=4,
-        padding=6,
-        content=ft.Column([qa_results_table], scroll="auto", height=300),
+        expand=True,
+        content=ft.Column([qa_header_row, qa_list_view], spacing=0, expand=True),
     )
     qa_report_title = ft.Text("Macro QA Report", weight="bold", visible=False)
     qa_report_box = ft.Container(
@@ -1467,7 +1465,7 @@ def main(page: ft.Page):
         padding=10,
         border=ft.border.all(1, "#eeeeee"),
         border_radius=5,
-        content=ft.Column([qa_results_title, qa_table_box, qa_report_title, qa_report_box], scroll="auto", expand=True, spacing=8)
+        content=ft.Column([qa_results_title, qa_table_box, qa_report_title, qa_report_box], spacing=8, expand=True)
     )
 
     def _pct(v):
@@ -1500,39 +1498,46 @@ def main(page: ft.Page):
 
     def _set_qa_table_columns(mode):
         if mode == "full_pipeline":
-            qa_results_table.columns = [
-                ft.DataColumn(_qa_header("Input File", _QA_W_FILE)),
-                ft.DataColumn(_qa_header("In→JSON", _QA_W_SCORE, center=True), numeric=True),
-                ft.DataColumn(_qa_header("JSON→DOCX", _QA_W_SCORE, center=True), numeric=True),
-                ft.DataColumn(_qa_header("Total", _QA_W_TOTAL, center=True), numeric=True),
-                ft.DataColumn(_qa_header("Comments", _QA_W_COMMENTS)),
+            qa_header_row.content.controls = [
+                _qa_header("Input File", _QA_W_FILE),
+                _qa_header("In→JSON", _QA_W_SCORE, center=True),
+                _qa_header("JSON→DOCX", _QA_W_SCORE, center=True),
+                _qa_header("Total", _QA_W_TOTAL, center=True),
+                _qa_header("Comments"),
             ]
         else:
             label = "DOCX Quality" if mode == "json_docx" else "Quality"
-            qa_results_table.columns = [
-                ft.DataColumn(_qa_header("Input File", _QA_W_FILE)),
-                ft.DataColumn(_qa_header(label, _QA_W_SCORE + 10, center=True), numeric=True),
-                ft.DataColumn(_qa_header("Comments", _QA_W_COMMENTS)),
+            qa_header_row.content.controls = [
+                _qa_header("Input File", _QA_W_FILE),
+                _qa_header(label, _QA_W_SCORE + 10, center=True),
+                _qa_header("Comments"),
             ]
+
+    def _qa_row_container(cells):
+        return ft.Container(
+            content=ft.Row(cells, vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+            padding=ft.padding.only(left=10, right=20, top=4, bottom=4),
+            border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.05, ft.colors.ON_SURFACE))),
+        )
 
     def _render_qa_rows(rows, mode):
         _set_qa_table_columns(mode)
-        qa_results_table.rows.clear()
+        qa_list_view.controls.clear()
         for row in rows or []:
             comments = str(row.get("comments", ""))
             if mode == "full_pipeline":
-                qa_results_table.rows.append(ft.DataRow(cells=[
-                    ft.DataCell(_qa_text_cell(str(row.get("input_file", "")), _QA_W_FILE)),
-                    ft.DataCell(_qa_text_cell(_pct(row.get("input_json")), _QA_W_SCORE, center=True, bold=True)),
-                    ft.DataCell(_qa_text_cell(_pct(row.get("json_docx")), _QA_W_SCORE, center=True, bold=True)),
-                    ft.DataCell(_qa_text_cell(_pct(row.get("total_quality")), _QA_W_TOTAL, center=True, bold=True)),
-                    ft.DataCell(_qa_text_cell(comments, _QA_W_COMMENTS, tooltip=comments)),
+                qa_list_view.controls.append(_qa_row_container([
+                    _qa_text_cell(str(row.get("input_file", "")), _QA_W_FILE),
+                    _qa_text_cell(_pct(row.get("input_json")), _QA_W_SCORE, center=True, bold=True),
+                    _qa_text_cell(_pct(row.get("json_docx")), _QA_W_SCORE, center=True, bold=True),
+                    _qa_text_cell(_pct(row.get("total_quality")), _QA_W_TOTAL, center=True, bold=True),
+                    _qa_text_cell(comments, tooltip=comments),
                 ]))
             else:
-                qa_results_table.rows.append(ft.DataRow(cells=[
-                    ft.DataCell(_qa_text_cell(str(row.get("input_file", "")), _QA_W_FILE)),
-                    ft.DataCell(_qa_text_cell(_pct(row.get("quality")), _QA_W_SCORE + 10, center=True, bold=True)),
-                    ft.DataCell(_qa_text_cell(comments, _QA_W_COMMENTS, tooltip=comments)),
+                qa_list_view.controls.append(_qa_row_container([
+                    _qa_text_cell(str(row.get("input_file", "")), _QA_W_FILE),
+                    _qa_text_cell(_pct(row.get("quality")), _QA_W_SCORE + 10, center=True, bold=True),
+                    _qa_text_cell(comments, tooltip=comments),
                 ]))
 
     _set_qa_table_columns(qa_compare_mode.value)
@@ -1591,6 +1596,13 @@ def main(page: ft.Page):
         qa_report_title.visible = bool(md_text)
         qa_report_box.visible = bool(md_text)
         qa_results_container.visible = bool(rows) or bool(md_text)
+        # When report appears, limit table height; otherwise expand to fill
+        if md_text:
+            qa_table_box.expand = False
+            qa_table_box.height = 300
+        else:
+            qa_table_box.expand = True
+            qa_table_box.height = None
         _render_qa_rows(rows, mode)
         qa_btn_copy.disabled = not bool(md_text)
         if saved_paths:
