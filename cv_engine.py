@@ -222,7 +222,7 @@ DEFAULT_PROMPTS = {
 3. **DEEP SCAN THE ENTIRE CV:** Extract from the whole document, including header, summary, skills blocks, Top Skills, experience bullets, project descriptions, certifications, languages, links, and side sections.
 4. **SKILLS & ENVIRONMENT:** Extract explicit skills, tools, technologies, frameworks, platforms, databases, cloud/services, and domain systems from all relevant sections. Put them into `skills` or role `environment` as appropriate. Do not create noisy or redundant generic skill categories.
 5. **DATES & CURRENT STATUS:** Extract all explicit dates from ALL sections including education, preserving the highest precision supported by the source (`April 2025`, `2018`, `Present`). Education years (e.g. `2012 - 2016`) MUST go into `education[].year`. If only a duration is available with no start/end dates (e.g. `6 years 5 months`), place it in `dates.start` and leave `dates.end` empty. Never invent dates. Never assign future dates to finished past roles.
-6. **CONTACTS, LINKS, LOCATIONS:** Extract all explicit phone numbers, emails, LinkedIn, GitHub, portfolio, websites, WhatsApp, and other links, plus the most granular explicit location. Do not infer location from vague context or company headquarters.
+6. **CONTACTS, LINKS, LOCATIONS:** Extract all explicit phone numbers, emails, LinkedIn, GitHub, portfolio, websites, WhatsApp, and other links, plus the most granular explicit location. Do not infer location from vague context or company headquarters. **SOCIAL HANDLES:** If the CV shows a username/handle next to a social-media icon (LinkedIn, GitHub, etc.) without a full URL, reconstruct the full URL: `https://linkedin.com/in/<handle>`, `https://github.com/<handle>`, etc. Never store a bare handle like `https://username` — always include the platform domain.
 7. **WORK EXPERIENCE INTEGRITY:** Merge all employment history into the single `experience` array, even if the CV splits it into multiple employment sections. Preserve explicit company, role title, dates, location, highlights, responsibilities, achievements, project details, and environment. Do not split one role unless clearly shown. Do not duplicate roles. Do not confuse role title with company name. If a role has only a duration (e.g. `6 years 5 months`) but no start/end dates, put the duration string into `dates.start` and leave `dates.end` as `""`.
 8. **CURRENT TITLE & NAME NORMALIZATION:** Preserve `basics.current_title` as close as possible to the resume header wording. Extract the real display name if explicit; if not, and the email clearly contains a safe `firstname.lastname` pattern, normalize it into a human-readable name. Do not invent beyond that.
 9. **CANONICAL SECTION ROUTING:** Core content must go only into its canonical sections: `basics`, `summary`, `skills`, `experience`, `education`, `certifications`, `languages`. Degrees must go to `education`, certifications to `certifications`, and language items with proficiency/test details to `languages`.
@@ -330,15 +330,17 @@ JOB DESCRIPTION:
 
 TAILORING RULES:
 1. Return ONLY a valid JSON object with exactly TWO top-level keys:
-   - "_tailoring_notes": a 2-3 sentence plain-English summary of specific changes made (e.g. "Promoted AWS and Docker skills to top. Reordered highlights in Dart Neuroscience to emphasize data pipeline work. Summary rewritten to highlight .NET and cloud experience.")
+   - "_tailoring_notes": a 2-3 sentence plain-English summary of specific changes made (e.g. "Promoted AWS and Docker skills to top. Reordered highlights in Dart Neuroscience to emphasize data pipeline work. Summary rewritten to highlight .NET and cloud experience. Relevance: HIGH.")
    - "cv": the complete tailored CV JSON (same schema as input)
 2. No markdown, no explanations — raw JSON only.
 3. Inside "cv" — keep the EXACT same schema as the input JSON. Do not remove mandatory keys.
-4. SUMMARY: Rewrite cv.summary.bullet_points to highlight aspects most relevant to the JD. Use JD keywords naturally. Do not fabricate achievements.
-5. SKILLS: Reorder skill categories and items so the most JD-relevant ones appear first. Do not add skills not present in the original.
-6. EXPERIENCE highlights: For each role, reorder bullet points so the most JD-relevant ones come first. Trim highlights clearly irrelevant to the JD (set to [] only if ALL highlights are irrelevant). Never invent new highlights.
-7. EXPERIENCE order: keep chronological order. Do NOT change: name, contacts, dates, company names, role titles, education, certifications.
-8. Output cv content in professional US English.
+4. RELEVANCE ASSESSMENT: Before tailoring, assess how relevant this candidate is to the JD. Include "Relevance: HIGH/MEDIUM/LOW" at the end of _tailoring_notes. Even for LOW relevance candidates, still do your best to highlight any transferable skills.
+5. SUMMARY: Rewrite cv.summary.bullet_points to strongly emphasize aspects matching the JD. Use JD keywords and phrases naturally. Connect the candidate's experience to JD requirements explicitly. Do not fabricate achievements.
+6. SKILLS: Reorder skill categories and individual items so the most JD-relevant ones appear first. Merge small categories if it improves readability. Do not add skills not present in the original.
+7. EXPERIENCE highlights: For each role, reorder bullet points so the most JD-relevant ones come first. Rephrase highlights to use JD terminology where the meaning is preserved. Trim highlights clearly irrelevant to the JD (set to [] only if ALL highlights are irrelevant). Never invent new highlights.
+8. EXPERIENCE order: keep chronological order. Do NOT change: name, contacts, dates, company names, role titles, education, certifications.
+9. DEDUPLICATION: If the input JSON contains duplicate experience entries (same company + similar dates), keep only one and merge their highlights.
+10. Output cv content in professional US English.
 
 INPUT JSON:
 {input_json_str}""",
@@ -376,7 +378,7 @@ CURRENT_PROMPT_MASTER_VERSION = 2
 
 DEFAULT_CONFIG = {
     "api_key": "", "github_token": "", "workspace_path": DEFAULT_WORKSPACE,
-    "import_mode": "qa", "anon_cut_name": True, "anon_remove_creds": True,
+    "import_mode": "none", "anon_cut_name": True, "anon_remove_creds": True,
     "anon_mask_companies": True, "keep_initial_current_title": False,
     "show_col_file": True, "show_col_company": True, "show_col_comments": True, "show_col_score": True,
     "show_xray_tab": False, "show_github_tab": False, "show_matcher_tab": False,
@@ -1324,7 +1326,54 @@ def sanitize_json(data):
     data['basics']['contacts'] = clean_contacts
     
     if not isinstance(data['basics'].get('links'), list): data['basics']['links'] = []
-    data['basics']['links'] = [str(l) for l in data['basics']['links'] if l and str(l).lower().strip() not in bad_values]
+    raw_links = [str(l).strip() for l in data['basics']['links'] if l and str(l).lower().strip() not in bad_values]
+    # Fix links: expand bare handles, fix missing-domain URLs, deduplicate
+    clean_links = []
+    seen_links = set()
+    _social_platform_hints = {
+        'linkedin': 'https://linkedin.com/in/',
+        'in': 'https://linkedin.com/in/',
+        'github': 'https://github.com/',
+        'gh': 'https://github.com/',
+    }
+    for lnk in raw_links:
+        expanded = []
+        # Normalize: strip leading "@", "in", "linkedin", "github" prefixes to extract handle
+        # e.g. "in @magnitopic" → handle "magnitopic", hint "linkedin"
+        # e.g. "@magnitopic" → handle "magnitopic", no hint
+        # e.g. "https://magnitopic" → handle "magnitopic"
+        cleaned = lnk
+        detected_platform = None
+        # Strip known platform prefix words
+        for prefix, url_base in _social_platform_hints.items():
+            if re.match(rf'^{prefix}\b\s*', cleaned, re.IGNORECASE):
+                cleaned = re.sub(rf'^{prefix}\s*', '', cleaned, flags=re.IGNORECASE).strip()
+                detected_platform = url_base
+                break
+        # Strip @ and protocol
+        cleaned = re.sub(r'^@', '', cleaned).strip()
+        cleaned = re.sub(r'^https?://', '', cleaned).strip()
+        # Now check if it's a bare handle (alphanumeric, no dots/spaces)
+        if re.match(r'^[a-zA-Z0-9_-]+$', cleaned):
+            if detected_platform:
+                expanded = [f"{detected_platform}{cleaned}"]
+                # Also add the other platform
+                other = 'https://github.com/' if 'linkedin' in detected_platform else 'https://linkedin.com/in/'
+                expanded.append(f"{other}{cleaned}")
+            else:
+                expanded = [f"https://linkedin.com/in/{cleaned}", f"https://github.com/{cleaned}"]
+        # Full URL with domain (contains a dot)
+        elif '.' in lnk:
+            expanded = [lnk]
+        # Unrecognized format — keep as-is
+        else:
+            expanded = [lnk]
+        for url in expanded:
+            low = url.lower()
+            if low not in seen_links:
+                seen_links.add(low)
+                clean_links.append(url)
+    data['basics']['links'] = clean_links
 
     if 'skills' not in data or not isinstance(data['skills'], dict): data['skills'] = {}
     clean_skills = {}
@@ -1375,7 +1424,10 @@ def sanitize_json(data):
             words = re.split(r'(\s+|/)', role_val)  # preserve separators
             job['role'] = ''.join(w if w.strip() in _role_acronyms else w.title() for w in words)
 
-    # Deduplicate experience entries by (company_name, role, start_date)
+    # Deduplicate experience entries:
+    # 1) Exact match by (company_name, role, start_date)
+    # 2) Fuzzy match: same start+end dates AND one company name contains the other
+    #    (catches LLM splitting one role into two entries with reshuffled fields)
     seen_exp = set()
     clean_exp = []
     for job in data['experience']:
@@ -1387,7 +1439,48 @@ def sanitize_json(data):
         if key in seen_exp:
             continue
         seen_exp.add(key)
-        clean_exp.append(job)
+        # Fuzzy duplicate check: same dates + overlapping company name
+        j_start = str((job.get('dates') or {}).get('start', '')).strip().lower()
+        j_end = str((job.get('dates') or {}).get('end', '')).strip().lower()
+        j_company = str(job.get('company_name', '')).strip().lower()
+        is_fuzzy_dup = False
+        if j_start and j_company:
+            for existing in clean_exp:
+                e_start = str((existing.get('dates') or {}).get('start', '')).strip().lower()
+                e_end = str((existing.get('dates') or {}).get('end', '')).strip().lower()
+                e_company = str(existing.get('company_name', '')).strip().lower()
+                if e_start == j_start and e_end == j_end and e_company and (
+                    j_company in e_company or e_company in j_company
+                ):
+                    # Merge: keep the entry with more highlights; add missing highlights from duplicate
+                    e_hl = existing.get('highlights') or []
+                    j_hl = job.get('highlights') or []
+                    if len(j_hl) > len(e_hl):
+                        existing['highlights'] = j_hl
+                    elif j_hl:
+                        e_hl_lower = {h.lower().strip() for h in e_hl}
+                        for h in j_hl:
+                            if h.lower().strip() not in e_hl_lower:
+                                e_hl.append(h)
+                    # Keep the longer company name (more specific)
+                    if len(j_company) > len(e_company):
+                        existing['company_name'] = job.get('company_name', '')
+                    # Keep non-empty project_description
+                    if not existing.get('project_description') and job.get('project_description'):
+                        existing['project_description'] = job['project_description']
+                    # Merge environments
+                    e_env = existing.get('environment') or []
+                    j_env = job.get('environment') or []
+                    if j_env:
+                        e_env_lower = {x.lower().strip() for x in e_env}
+                        for x in j_env:
+                            if x.lower().strip() not in e_env_lower:
+                                e_env.append(x)
+                        existing['environment'] = e_env
+                    is_fuzzy_dup = True
+                    break
+        if not is_fuzzy_dup:
+            clean_exp.append(job)
     data['experience'] = clean_exp
 
     # Enrich skills from experience environments: collect unique items not already in skills

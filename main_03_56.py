@@ -917,34 +917,59 @@ def main(page: ft.Page):
     tailor_anonymize_cb = ft.Checkbox(label="Anonymize", value=config.get("tailor_anonymize", False), on_change=lambda e: save_config(config.update({"tailor_anonymize": e.control.value}) or config))
     btn_run_tailor = ft.ElevatedButton("Tailor & Generate CV", icon="tune", bgcolor="#4CAF50", color="white")
 
-    tailor_results_table = ft.DataTable(
-        columns=[ft.DataColumn(ft.Text(n, weight="bold")) for n in ["Name", "Status", "Changes Made", "File"]],
-        rows=[], visible=False, column_spacing=15, data_row_min_height=40, data_row_max_height=80, heading_row_height=40
+    _TL_W_NAME = 180
+    _TL_W_STATUS = 80
+    _TL_W_CHANGES = 400
+    _TL_W_FILE = 220
+
+    tailor_header_row = ft.Container(
+        content=ft.Row([
+            ft.Container(content=ft.Text("Name", weight="bold"), width=_TL_W_NAME),
+            ft.Container(content=ft.Text("Status", weight="bold"), width=_TL_W_STATUS),
+            ft.Container(content=ft.Text("Changes Made", weight="bold"), width=_TL_W_CHANGES),
+            ft.Container(content=ft.Text("File", weight="bold"), width=_TL_W_FILE),
+        ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+        bgcolor=ft.colors.with_opacity(0.05, ft.colors.ON_SURFACE),
+        padding=ft.padding.only(left=10, right=20, top=6, bottom=6),
+        border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.1, ft.colors.ON_SURFACE))),
     )
+    tailor_list_view = ft.ListView(expand=True, spacing=0)
     tailor_table_container = ft.Container(
-        content=ft.Column([tailor_results_table], scroll="auto"),
-        expand=True, border=ft.border.all(1, "#eeeeee"), padding=5, visible=False
+        content=ft.Column([tailor_header_row, tailor_list_view], spacing=0, expand=True),
+        expand=True, border=ft.border.all(1, "#eeeeee"), visible=False
     )
 
     def on_tailor_row_update(cand_name, status, notes, filename):
         status_color = "green" if "✅" in status else "red"
-        tailor_results_table.rows.append(ft.DataRow(cells=[
-            ft.DataCell(ft.Text(cand_name, weight="bold", size=12, width=150)),
-            ft.DataCell(ft.Text(status, color=status_color, size=12, width=80)),
-            ft.DataCell(ft.Container(content=ft.Text(notes, size=12, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS), width=350, tooltip=notes)),
-            ft.DataCell(ft.Text(filename, size=11, color="grey", width=200)),
-        ]))
-        tailor_results_table.visible = True
+        tailor_list_view.controls.append(ft.Container(
+            content=ft.Row([
+                ft.Container(content=ft.Text(cand_name, weight="bold", size=12), width=_TL_W_NAME),
+                ft.Container(content=ft.Text(status, color=status_color, size=12), width=_TL_W_STATUS),
+                ft.Container(
+                    content=ft.Tooltip(
+                        message=notes,
+                        content=ft.Text(notes, size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                    ),
+                    width=_TL_W_CHANGES,
+                ),
+                ft.Container(content=ft.Text(filename, size=11, color="grey"), width=_TL_W_FILE),
+            ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+            padding=ft.padding.only(left=10, right=20, top=4, bottom=4),
+            border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.05, ft.colors.ON_SURFACE))),
+        ))
         tailor_table_container.visible = True
         page.update()
+        try:
+            tailor_list_view.scroll_to(offset=-1, duration=100)
+        except Exception:
+            pass
 
     def act_run_tailor(e):
         items = get_selected()
         if not items: return show_snack("Please select CVs in the 'CVs' tab first!")
         if len(tailor_jd_input.value) < 10: return show_snack("Please enter a Job Description!")
         if not require_api_key(): return
-        tailor_results_table.rows.clear()
-        tailor_results_table.visible = False
+        tailor_list_view.controls.clear()
         tailor_table_container.visible = False
         page.update()
         run_in_background(run_tailor_task, items, tailor_jd_input.value, config, WORKSPACE_FOLDERS, task_state, db_files, cbs, tailor_anonymize_cb.value, on_tailor_row_update)
@@ -1573,6 +1598,10 @@ def main(page: ft.Page):
         qa_results_container.visible = True
         _render_qa_rows(qa_rows_state, qa_compare_mode.value)
         page.update()
+        try:
+            qa_list_view.scroll_to(offset=-1, duration=100)
+        except Exception:
+            pass
 
     def on_qa_complete(payload):
         nonlocal qa_rows_state
@@ -1768,7 +1797,7 @@ def main(page: ft.Page):
     set_workspace = ft.TextField(label="Workspace Path", value=config.get("workspace_path", DEFAULT_WORKSPACE), text_size=13, expand=True, on_blur=lambda e: apply_settings())
     btn_browse = ft.ElevatedButton("Browse...", icon="folder", on_click=lambda _: workspace_picker.get_directory_path())
 
-    set_import_mode = ft.RadioGroup(content=ft.Column([ft.Radio(value="none", label="Fast Import (Skip QA)"), ft.Radio(value="qa", label="Auto-QA (Audit Only)"), ft.Radio(value="fix", label="Auto-QA & Auto-Fix")], spacing=5), value=config.get("import_mode", "fix"))
+    set_import_mode = ft.RadioGroup(content=ft.Column([ft.Radio(value="none", label="Fast Import (Skip QA)"), ft.Radio(value="qa", label="Auto-QA (Audit Only)"), ft.Radio(value="fix", label="Auto-QA & Auto-Fix")], spacing=5), value=config.get("import_mode", "none"))
     set_autofix_threshold = ft.TextField(label="Auto-Fix Threshold", value=str(config.get("autofix_threshold", 90)), width=130, text_size=13, suffix_text="/100", keyboard_type=ft.KeyboardType.NUMBER)
     set_generate_docx = ft.Checkbox(label="Generate DOCX", value=config.get("generate_docx_on_import", False))
     set_keep_initial_title = ft.Switch(label="Preserve original Job Title in DOCX", value=config.get("keep_initial_current_title", False))
