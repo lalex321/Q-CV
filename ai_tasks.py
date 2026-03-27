@@ -57,7 +57,8 @@ from cv_engine import (
     FILE_UPLOAD_TIMEOUT_SEC,
     process_file_gemini, extract_text_from_docx, sanitize_json,
     generate_docx_from_json, smart_anonymize_data,
-    translate_locations_via_llm, translate_dates_via_llm
+    translate_locations_via_llm, translate_dates_via_llm,
+    translate_full_json_via_llm
 )
 
 # ==========================================
@@ -839,7 +840,16 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                         except Exception as e:
                             cbs['log'](f"   ❌ Auto-QA/Fix failed during import: {e}", "red")
 
-                    # Translate non-English dates and locations via LLM
+                    # Full translation pass if significant non-English content detected
+                    try:
+                        full_tr = translate_full_json_via_llm(data, api_key)
+                        if full_tr:
+                            cbs['log'](f"   🌐 {full_tr}", "blue")
+                            data = sanitize_json(data)
+                    except Exception:
+                        pass
+
+                    # Translate remaining non-English dates and locations via LLM
                     try:
                         date_changes = translate_dates_via_llm(data, api_key)
                         if date_changes:

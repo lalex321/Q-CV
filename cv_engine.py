@@ -1066,6 +1066,104 @@ def translate_dates_via_llm(data, api_key):
         return []
 
 
+def _has_cyrillic(s):
+    """Return True if string contains Cyrillic characters."""
+    return bool(s) and any('\u0400' <= c <= '\u04FF' for c in str(s))
+
+
+def _count_cyrillic_strings(obj):
+    """Count how many string values in a nested structure contain Cyrillic."""
+    count = 0
+    if isinstance(obj, str):
+        return 1 if _has_cyrillic(obj) else 0
+    if isinstance(obj, list):
+        for item in obj:
+            count += _count_cyrillic_strings(item)
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            if k.startswith('_') or k in ('qa_audit', 'import_date', '_source_filename', '_source_hash'):
+                continue
+            count += _count_cyrillic_strings(v)
+    return count
+
+
+def translate_full_json_via_llm(data, api_key):
+    """Translate entire CV JSON to US English if significant Cyrillic content detected.
+    Also removes duplicate entries (Russian+English pairs in experience/education/certifications).
+    Modifies data in-place. Returns description of changes or empty string."""
+    if not api_key or not isinstance(data, dict):
+        return ""
+
+    cyrillic_count = _count_cyrillic_strings(data)
+    if cyrillic_count < 3:
+        return ""  # Minor Cyrillic (e.g. just a location) — handled by specific translators
+
+    # Prepare a clean copy without volatile keys
+    SKIP_KEYS = {'qa_audit', 'match_analysis', '_status', 'selected', 'ts',
+                 'import_date', '_source_filename', '_source_hash', '_comment'}
+    clean = {k: v for k, v in data.items() if k not in SKIP_KEYS}
+
+    prompt = (
+        "You are a professional CV translator. The JSON below contains a CV with mixed "
+        "Russian and English content, and possibly DUPLICATE entries (same role/education/certification "
+        "appearing in both Russian and English).\n\n"
+        "Your tasks:\n"
+        "1. TRANSLATE all Russian text to professional US English.\n"
+        "2. DEDUPLICATE: if the same experience role, education entry, or certification appears "
+        "in both Russian and English, keep ONLY the English version (merging any extra details from the Russian one).\n"
+        "3. PRESERVE all factual content — do NOT remove, invent, or alter any facts.\n"
+        "4. Keep the exact same JSON structure and keys.\n"
+        "5. Return ONLY the translated JSON object, no markdown wrappers.\n\n"
+        f"{json.dumps(clean, indent=2, ensure_ascii=False)}"
+    )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+        txt = (getattr(resp, 'text', '') or '').strip()
+        txt = txt.replace('```json', '').replace('```', '').strip()
+        translated = json.loads(txt)
+
+        if not isinstance(translated, dict):
+            return ""
+
+        # Verify no significant data loss: translated should not have fewer strings
+        # (but may have fewer due to dedup — allow some reduction)
+        orig_strs = _count_non_empty_strings(clean)
+        new_strs = _count_non_empty_strings(translated)
+        # Allow up to 40% fewer strings (dedup removes Russian duplicates)
+        if new_strs < orig_strs * 0.5:
+            return ""  # Too much lost — reject
+
+        # Check Cyrillic is actually reduced
+        new_cyrillic = _count_cyrillic_strings(translated)
+        if new_cyrillic >= cyrillic_count:
+            return ""  # Translation didn't help
+
+        # Apply translated content back to data (preserve skipped keys)
+        for k in list(data.keys()):
+            if k not in SKIP_KEYS and k in translated:
+                data[k] = translated[k]
+
+        return f"Translated {cyrillic_count} non-English fields to US English (Cyrillic remaining: {new_cyrillic})"
+    except Exception:
+        return ""
+
+
+def _count_non_empty_strings(obj):
+    """Count non-empty strings in a nested structure."""
+    count = 0
+    if isinstance(obj, str):
+        return 1 if obj.strip() else 0
+    if isinstance(obj, list):
+        for item in obj:
+            count += _count_non_empty_strings(item)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            count += _count_non_empty_strings(v)
+    return count
+
+
 def _is_future_date(s):
     """Return True if date string represents a month/year clearly in the future."""
     if not isinstance(s, str): return False
