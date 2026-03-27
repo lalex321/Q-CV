@@ -58,7 +58,7 @@ from cv_engine import (
     process_file_gemini, extract_text_from_docx, sanitize_json,
     generate_docx_from_json, smart_anonymize_data,
     translate_locations_via_llm, translate_dates_via_llm,
-    translate_full_json_via_llm
+    translate_full_json_via_llm, translate_remaining_strings_via_llm
 )
 
 # ==========================================
@@ -860,6 +860,14 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
                         loc_changes = translate_locations_via_llm(data, api_key)
                         if loc_changes:
                             cbs['log'](f"   🌍 Translated locations: {', '.join(loc_changes)}", "blue")
+                    except Exception:
+                        pass
+
+                    # Final sweep: translate any remaining non-English strings
+                    try:
+                        str_changes = translate_remaining_strings_via_llm(data, api_key)
+                        if str_changes:
+                            cbs['log'](f"   🔤 Translated remaining strings: {', '.join(str_changes)}", "blue")
                     except Exception:
                         pass
 

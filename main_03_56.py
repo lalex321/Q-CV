@@ -30,8 +30,7 @@ from cv_engine import (
     DEFAULT_PROMPTS, CV_JSON_SCHEMA, CURRENT_PROMPT_MASTER_VERSION,
     load_config, save_config, init_workspace_folders, open_folder,
     sanitize_json, extract_text_from_docx, process_file_gemini,
-    generate_docx_from_json, MASTER_PROMPTS_FILE, ensure_master_prompts_registry,
-    get_master_prompt_text, get_master_prompt_entry, save_master_prompt_version
+    generate_docx_from_json
 )
 
 from ai_tasks import *
@@ -1594,8 +1593,6 @@ def main(page: ft.Page):
         qa_results_container.visible = bool(rows) or bool(md_text)
         _render_qa_rows(rows, mode)
         qa_btn_copy.disabled = not bool(md_text)
-        if md_text and "Error" not in md_text and mode == "input_json":
-            btn_auto_tune.disabled = False
         if saved_paths:
             show_snack(f"QA reports saved to {saved_paths.get('dir')}")
             log_msg(f"QA reports saved: {saved_paths.get('json')} | {saved_paths.get('csv')} | {saved_paths.get('md')}", "green")
@@ -1622,17 +1619,16 @@ def main(page: ft.Page):
         qa_results_title.visible = True
         _set_qa_table_columns(qa_compare_mode.value)
         _render_qa_rows(qa_rows_state, qa_compare_mode.value)
-        btn_auto_tune.disabled = True
         page.update()
         run_in_background(run_batch_qa_task, random.sample(valid_cands, sc), sc, config, WORKSPACE_FOLDERS, task_state, cbs, on_qa_complete)
 
     qa_btn_run = ft.ElevatedButton("Run Batch QA Audit", icon="bug_report", bgcolor="#2196F3", color="white", on_click=act_run_batch_qa)
-    btn_auto_tune = ft.ElevatedButton("Auto-Tune Master Prompt", icon="auto_awesome", disabled=True)
+    btn_open_reports = ft.ElevatedButton("Open Reports Folder", icon="folder_open", on_click=lambda e: open_folder(WORKSPACE_FOLDERS["REPORTS"]))
 
     qa_controls = ft.Column([
-        ft.Text("Run batch micro-audits to find systemic data loss. The Wizard will tune your PROMPT_MASTER.", color="grey"),
+        ft.Text("Run batch micro-audits to find systemic data loss.", color="grey"),
         qa_compare_mode,
-        ft.Row([qa_sample_size, qa_btn_run, qa_btn_copy, btn_auto_tune], wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ft.Row([qa_sample_size, qa_btn_run, qa_btn_copy, btn_open_reports], wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ft.Divider(),
         qa_results_container,
     ], expand=True, spacing=10)
@@ -1643,35 +1639,6 @@ def main(page: ft.Page):
 
     prompt_text_fields = {}
     prompt_lab_content = ft.Column(scroll="auto", expand=True, spacing=15)
-    master_prompt_registry = ensure_master_prompts_registry()
-
-    def _sorted_master_prompt_entries():
-        reg = ensure_master_prompts_registry()
-        entries = [e for e in reg.get("prompts", []) if isinstance(e, dict)]
-        return sorted(entries, key=lambda e: int(e.get("version", 0)))
-
-    def _master_prompt_options():
-        opts = []
-        for entry in _sorted_master_prompt_entries():
-            ver = int(entry.get("version", 0))
-            title = entry.get("title") or f"Master Prompt v{ver}"
-            status = entry.get("status") or "saved"
-            opts.append(ft.dropdown.Option(str(ver), f"v{ver} — {title} [{status}]"))
-        return opts
-
-    def _master_prompt_meta(version_value):
-        try:
-            version_value = int(version_value)
-        except Exception:
-            version_value = config.get("active_prompt_version", CURRENT_PROMPT_MASTER_VERSION)
-        entry = get_master_prompt_entry(version_value, registry=ensure_master_prompts_registry()) or {}
-        title = entry.get("title") or f"Master Prompt v{version_value}"
-        status = entry.get("status") or "saved"
-        based_on = entry.get("based_on")
-        notes = (entry.get("notes") or "").strip()
-        note_tail = f" — {notes}" if notes else ""
-        base_tail = f", based on v{based_on}" if based_on else ""
-        return f"Version v{version_value}: {title} [{status}{base_tail}]{note_tail}"
 
     p_defs = [
         ("prompt_master_inst", "⚙️ Master Parser"),
@@ -1696,148 +1663,32 @@ def main(page: ft.Page):
         )
         prompt_text_fields[p_key] = tf
 
-        master_version_dd = None
-        master_meta_txt = None
-
-        if p_key == "prompt_master_inst":
-            master_version_dd = ft.Dropdown(
-                label="Saved Master Prompt Version",
-                options=_master_prompt_options(),
-                value=str(config.get("active_prompt_version", CURRENT_PROMPT_MASTER_VERSION)),
-                width=360,
-                text_size=13,
-                height=50,
-            )
-            master_meta_txt = ft.Text(
-                _master_prompt_meta(master_version_dd.value),
-                size=11,
-                color="grey",
-                selectable=True,
-            )
-
-            def _refresh_master_prompt_controls(version_dd, meta_txt, selected_value=None):
-                reg = ensure_master_prompts_registry()
-                if version_dd is None or meta_txt is None:
-                    return
-                selected_value = str(selected_value or config.get("active_prompt_version", CURRENT_PROMPT_MASTER_VERSION))
-                version_dd.options = _master_prompt_options()
-                versions = {opt.key for opt in version_dd.options}
-                version_dd.value = selected_value if selected_value in versions else str(config.get("active_prompt_version", CURRENT_PROMPT_MASTER_VERSION))
-                meta_txt.value = _master_prompt_meta(version_dd.value)
-
-        def create_save_handler(k, t, version_dd=None, meta_txt=None):
+        def create_save_handler(k, t):
             def _save(e):
                 config[k] = t.value
-                if k == "prompt_master_inst":
-                    based_on = config.get("active_prompt_version") or config.get("prompt_master_version") or CURRENT_PROMPT_MASTER_VERSION
-                    new_ver, _registry = save_master_prompt_version(
-                        t.value,
-                        title="Prompt Editor save",
-                        notes="Saved from Prompt Editor.",
-                        based_on=based_on,
-                        make_active=True,
-                        status="experimental",
-                    )
-                    config["prompt_master_user_edited"] = True
-                    config["active_prompt_version"] = new_ver
-                    config["prompt_master_version"] = new_ver
-                    config["_prompt_master_upgrade_warning"] = False
-                    if version_dd and meta_txt:
-                        _refresh_master_prompt_controls(version_dd, meta_txt, str(new_ver))
-                        version_dd.update()
-                        meta_txt.update()
-                    save_config(config)
-                    show_snack(f"Saved Master Prompt as version v{new_ver}")
-                    return
                 save_config(config)
                 show_snack(f"Saved: {k}")
             return _save
 
-        def create_reset_handler(k, t, version_dd=None, meta_txt=None):
+        def create_reset_handler(k, t):
             def _reset(e):
-                if k == "prompt_master_inst":
-                    default_ver = CURRENT_PROMPT_MASTER_VERSION
-                    default_txt = get_master_prompt_text(default_ver) or DEFAULT_PROMPTS.get(k, "")
-                    t.value = default_txt
-                    config[k] = default_txt
-                    config["prompt_master_user_edited"] = False
-                    config["active_prompt_version"] = default_ver
-                    config["prompt_master_version"] = default_ver
-                    config["_prompt_master_upgrade_warning"] = False
-                    save_config(config)
-                    if version_dd and meta_txt:
-                        _refresh_master_prompt_controls(version_dd, meta_txt, str(default_ver))
-                        version_dd.update()
-                        meta_txt.update()
-                    t.update()
-                    show_snack(f"Reset Master Prompt to default v{default_ver}")
-                    return
                 t.value = DEFAULT_PROMPTS.get(k, "")
                 config[k] = DEFAULT_PROMPTS.get(k, "")
                 save_config(config)
                 t.update()
-                show_snack(f"Reset: {k}")
+                show_snack(f"Reset to default: {k}")
             return _reset
 
         btn_save_prompt = ft.ElevatedButton(
-            "Save as New Version" if p_key == "prompt_master_inst" else "Save",
-            icon="save",
-            on_click=create_save_handler(p_key, tf, master_version_dd, master_meta_txt),
-            bgcolor="green",
-            color="white"
+            "Save", icon="save",
+            on_click=create_save_handler(p_key, tf),
+            bgcolor="green", color="white"
         )
         btn_reset_prompt = ft.ElevatedButton(
-            "Reset to Default", icon="restore", on_click=create_reset_handler(p_key, tf, master_version_dd, master_meta_txt), color="red"
+            "Reset to Default", icon="restore",
+            on_click=create_reset_handler(p_key, tf),
+            color="red"
         )
-
-        extra_controls = []
-        if p_key == "prompt_master_inst":
-            def create_master_load_handler(text_field, version_dd, meta_txt):
-                def _load_selected_version(e):
-                    selected = (version_dd.value if version_dd else None) or str(config.get("active_prompt_version", CURRENT_PROMPT_MASTER_VERSION))
-                    selected_txt = get_master_prompt_text(selected)
-                    if not selected_txt:
-                        show_snack(f"Master Prompt v{selected} has no stored text")
-                        return
-                    text_field.value = selected_txt
-                    meta_txt.value = _master_prompt_meta(selected)
-                    text_field.update()
-                    meta_txt.update()
-                    show_snack(f"Loaded Master Prompt v{selected} into editor")
-                return _load_selected_version
-
-            def create_master_activate_handler(text_field, version_dd, meta_txt):
-                def _activate_selected_version(e):
-                    selected = (version_dd.value if version_dd else None) or str(config.get("active_prompt_version", CURRENT_PROMPT_MASTER_VERSION))
-                    selected_txt = get_master_prompt_text(selected)
-                    if not selected_txt:
-                        show_snack(f"Master Prompt v{selected} has no stored text")
-                        return
-                    text_field.value = selected_txt
-                    config["prompt_master_inst"] = selected_txt
-                    config["prompt_master_user_edited"] = False
-                    config["active_prompt_version"] = int(selected)
-                    config["prompt_master_version"] = int(selected)
-                    config["_prompt_master_upgrade_warning"] = False
-                    save_config(config)
-                    _refresh_master_prompt_controls(version_dd, meta_txt, selected)
-                    text_field.update()
-                    if version_dd:
-                        version_dd.update()
-                    if meta_txt:
-                        meta_txt.update()
-                    show_snack(f"Activated Master Prompt v{selected}")
-                return _activate_selected_version
-
-            extra_controls = [
-                ft.Text(f"Registry file: {MASTER_PROMPTS_FILE}", size=11, color="grey", selectable=True),
-                ft.Row([
-                    master_version_dd,
-                    ft.ElevatedButton("Load Version", icon="download", on_click=create_master_load_handler(tf, master_version_dd, master_meta_txt)),
-                    ft.ElevatedButton("Activate Version", icon="published_with_changes", on_click=create_master_activate_handler(tf, master_version_dd, master_meta_txt)),
-                ], wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                master_meta_txt,
-            ]
 
         prompt_lab_content.controls.append(
             ft.Card(
@@ -1845,7 +1696,6 @@ def main(page: ft.Page):
                     padding=15,
                     content=ft.Column([
                         ft.Text(p_label, weight="bold", size=16),
-                        *extra_controls,
                         tf,
                         ft.Row([btn_save_prompt, btn_reset_prompt]),
                     ])
@@ -1862,7 +1712,7 @@ def main(page: ft.Page):
         selected_index=0,
         animation_duration=150,
         tabs=[
-            ft.Tab(text="QA & Auto-Tuning", content=ft.Container(content=qa_controls, padding=ft.padding.only(top=10))),
+            ft.Tab(text="Pipeline QA", content=ft.Container(content=qa_controls, padding=ft.padding.only(top=10))),
             ft.Tab(text="Prompt Editor", content=ft.Container(content=prompt_editor_view, padding=ft.padding.only(top=10))),
         ],
         expand=True,

@@ -1164,6 +1164,72 @@ def _count_non_empty_strings(obj):
     return count
 
 
+def translate_remaining_strings_via_llm(data, api_key):
+    """Find and translate any remaining non-English string values in CV JSON.
+    Handles stray Cyrillic/CJK/Arabic/etc. strings that weren't caught by
+    full translation or date/location translators.
+    Modifies data in-place. Returns list of changes for logging."""
+    if not api_key or not isinstance(data, dict):
+        return []
+
+    SKIP_KEYS = {'qa_audit', 'match_analysis', '_status', 'selected', 'ts',
+                 'import_date', '_source_filename', '_source_hash', '_comment'}
+
+    # Collect all non-English strings with their paths for in-place update
+    non_eng = {}  # text -> list of (parent_obj, key_or_index)
+
+    def _walk(obj, parent=None, key=None):
+        if isinstance(obj, str):
+            if obj.strip() and _has_non_ascii(obj):
+                non_eng.setdefault(obj.strip(), []).append((parent, key))
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                _walk(item, obj, i)
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                if k in SKIP_KEYS or k.startswith('_'):
+                    continue
+                _walk(v, obj, k)
+
+    _walk(data)
+
+    if not non_eng:
+        return []
+
+    unique_strings = list(non_eng.keys())
+    numbered = "\n".join(f"{i+1}. {s}" for i, s in enumerate(unique_strings))
+
+    prompt = (
+        "Translate the following strings to professional US English. "
+        "Keep technical terms, proper names, and abbreviations as-is. "
+        "Return ONLY a JSON array of translated strings in the same order. "
+        "If a string is already in English, return it unchanged.\n\n"
+        f"{numbered}"
+    )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+        txt = (getattr(resp, 'text', '') or '').strip()
+        txt = txt.replace('```json', '').replace('```', '').strip()
+        translated = json.loads(txt)
+
+        if not isinstance(translated, list) or len(translated) != len(unique_strings):
+            return []
+
+        changes = []
+        for orig, eng in zip(unique_strings, translated):
+            eng = str(eng).strip()
+            if eng and eng != orig:
+                for parent, key in non_eng[orig]:
+                    if parent is not None and key is not None:
+                        parent[key] = eng
+                changes.append(f"{orig[:40]} → {eng[:40]}")
+        return changes
+    except Exception:
+        return []
+
+
 def _is_future_date(s):
     """Return True if date string represents a month/year clearly in the future."""
     if not isinstance(s, str): return False
