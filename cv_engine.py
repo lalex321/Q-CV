@@ -1971,7 +1971,14 @@ def process_file_gemini(file_path, api_key, custom_instructions, task_state=None
     cost = (in_tok / 1_000_000 * PRICE_1M_IN) + (out_tok / 1_000_000 * PRICE_1M_OUT)
     
     if not text: return None, in_tok, out_tok, cost
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Attempt repair: fix trailing commas, missing commas between objects
+        repaired = re.sub(r',\s*([}\]])', r'\1', text)
+        repaired = re.sub(r'(\})\s*(\{)', r'\1,\2', repaired)
+        repaired = re.sub(r'(")\s*\n\s*(")', r'\1,\n\2', repaired)
+        data = json.loads(repaired)
     return sanitize_json(data), in_tok, out_tok, cost
 
 def generate_docx_from_json(data, output_path, cfg):

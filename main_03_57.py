@@ -1517,7 +1517,7 @@ def main(page: ft.Page):
         padding=10,
         border=ft.border.all(1, "#eeeeee"),
         border_radius=5,
-        content=ft.Column([qa_results_title, qa_table_box, qa_report_title, qa_report_box], spacing=8, expand=True)
+        content=ft.Column([qa_results_title, qa_table_box, qa_report_title, qa_report_box], spacing=8, expand=True, scroll="auto")
     )
 
     def _pct(v):
