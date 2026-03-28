@@ -160,7 +160,7 @@ def fix_docx_path_bug():
 fix_docx_path_bug()
 # ==========================================
 
-MODEL_NAME = 'gemini-2.5-flash-preview-05-20'
+MODEL_NAME = 'gemini-2.5-flash'
 APP_VERSION = "03.57"
 
 # 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
