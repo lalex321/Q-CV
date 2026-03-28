@@ -545,7 +545,7 @@ def main(page: ft.Page):
             except Exception: pass
         if label == "CV Matcher":
             db_count = len(db_files)
-            if not matcher_results_table.visible: matcher_info.value = f"{db_count} CVs in database."
+            if not table_container.visible: matcher_info.value = f"{db_count} CVs in database."
             if db_count > last_csv_count and last_csv_count > 0:
                 warning_banner.content.controls[1].value = f"⚠️ {db_count - last_csv_count} new CV(s) in database! Click 'Analyze Database' to update the report."
                 warning_banner.visible = True
@@ -1004,7 +1004,8 @@ def main(page: ft.Page):
             
             prompt = config.get("prompt_github", DEFAULT_PROMPTS["prompt_github"]).replace("{prompt_schema_only}", CV_JSON_SCHEMA).replace("{gh_full_data}", json.dumps({"user": user_data, "recent_repos": repos_data or []}, ensure_ascii=False))
             
-            resp = genai.Client(api_key=config.get("api_key")).models.generate_content(model=MODEL_NAME, contents=prompt)
+            client = genai.Client(api_key=config.get("api_key"))
+            resp = client.models.generate_content(model=MODEL_NAME, contents=prompt)
             
             i_tok = getattr(resp.usage_metadata, 'prompt_token_count', 0); o_tok = getattr(resp.usage_metadata, 'candidates_token_count', 0)
             cost = (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT); update_billing(i_tok, o_tok, cost)
@@ -1381,8 +1382,45 @@ def main(page: ft.Page):
     matcher_info = ft.Text("Ready to analyze CVs.", size=16, weight="bold")
     warning_banner = ft.Container(content=ft.Row([ft.Icon("warning_amber_rounded", color="white"), ft.Text("⚠️ New CVs in database!", color="white", weight="bold")]), bgcolor="orange", padding=10, border_radius=5, visible=False)
     jd_input = ft.TextField(label="Job Description", value=config.get("last_jd", ""), multiline=True, min_lines=4, max_lines=8, on_change=lambda e: save_config(config.update({"last_jd": e.control.value}) or config))
-    matcher_results_table = ft.DataTable(columns=[ft.DataColumn(ft.Text(n, weight="bold")) for n in ["Score", "Name", "Verdict", "Pros", "Missing Skills", "View"]], rows=[], visible=False, column_spacing=15, data_row_min_height=40, data_row_max_height=55, heading_row_height=40)
-    table_container = ft.Container(content=ft.Column([matcher_results_table], scroll="auto"), expand=True, border=ft.border.all(1, "#eeeeee"), padding=5, visible=False)
+    _MT_W_SCORE = 50; _MT_W_NAME = 150; _MT_W_VERDICT = 200; _MT_W_PROS = 250; _MT_W_MISSING = 250; _MT_W_VIEW = 40
+
+    matcher_header_row = ft.Container(
+        content=ft.Row([
+            ft.Container(content=ft.Text("Score", weight="bold"), width=_MT_W_SCORE),
+            ft.Container(content=ft.Text("Name", weight="bold"), width=_MT_W_NAME),
+            ft.Container(content=ft.Text("Verdict", weight="bold"), width=_MT_W_VERDICT),
+            ft.Container(content=ft.Text("Pros", weight="bold"), width=_MT_W_PROS),
+            ft.Container(content=ft.Text("Missing Skills", weight="bold"), width=_MT_W_MISSING),
+            ft.Container(width=_MT_W_VIEW),
+        ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+        bgcolor=ft.colors.with_opacity(0.05, ft.colors.ON_SURFACE),
+        padding=ft.padding.only(left=10, right=20, top=6, bottom=6),
+        border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.1, ft.colors.ON_SURFACE))),
+    )
+    matcher_list_view = ft.ListView(expand=True, spacing=0)
+    table_container = ft.Container(
+        content=ft.Column([matcher_header_row, matcher_list_view], spacing=0, expand=True),
+        expand=True, border=ft.border.all(1, "#eeeeee"), visible=False
+    )
+
+    def _matcher_row(score_val, name, verdict, pros, missing, on_click_handler):
+        num_score = safe_int(score_val)
+        score_color = "green" if num_score >= 70 else ("orange" if num_score >= 40 else "red")
+        return ft.GestureDetector(
+            on_double_tap=on_click_handler,
+            content=ft.Container(
+                content=ft.Row([
+                    ft.Container(content=ft.Text(score_val, weight="bold", color=score_color, size=13), width=_MT_W_SCORE),
+                    ft.Container(content=ft.Text(name, weight="bold", size=12), width=_MT_W_NAME),
+                    ft.Container(content=ft.Tooltip(message=verdict, content=ft.Text(verdict, size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)), width=_MT_W_VERDICT),
+                    ft.Container(content=ft.Tooltip(message=pros, content=ft.Text(pros, size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)), width=_MT_W_PROS),
+                    ft.Container(content=ft.Tooltip(message=missing, content=ft.Text(missing, size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)), width=_MT_W_MISSING),
+                    ft.Container(content=ft.IconButton(icon=ft.icons.REMOVE_RED_EYE, icon_color="blue", tooltip="Preview CV", on_click=on_click_handler), width=_MT_W_VIEW),
+                ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                padding=ft.padding.only(left=10, right=20, top=4, bottom=4),
+                border=ft.border.only(bottom=ft.border.BorderSide(1, ft.colors.with_opacity(0.05, ft.colors.ON_SURFACE))),
+            ),
+        )
 
     def load_latest_report_to_ui():
         nonlocal last_csv_count
@@ -1392,57 +1430,46 @@ def main(page: ft.Page):
         latest_csv = max(csv_files, key=os.path.getmtime)
         try:
             with open(latest_csv, 'r', encoding='utf-8') as f: rows = list(csv.DictReader(f))
-            last_csv_count = len(rows); matcher_results_table.rows.clear()
+            last_csv_count = len(rows); matcher_list_view.controls.clear()
             for p in rows:
-                score_val = str(p.get('Score', '0'))
-                num_score = safe_int(score_val)
-                score_color = "green" if num_score >= 70 else ("orange" if num_score >= 40 else "red")
-                
-                # --- FACTORY FOR PREVIEW IN MATCHER ---
                 def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
                 dt_handler = create_preview_handler(p.get('Filename', ''))
-                
-                matcher_results_table.rows.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(score_val, weight="bold", color=score_color, size=13), width=50))),
-                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('Name', 'Unknown')), weight="bold", size=12), width=150))),
-                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('Verdict', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=200, tooltip=format_tooltip(p.get('Verdict', ''))))),
-                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('Pros', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('Pros', ''))))),
-                    ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('Missing Skills', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('Missing Skills', ''))))),
-                    ft.DataCell(ft.IconButton(icon=ft.icons.REMOVE_RED_EYE, icon_color="blue", tooltip="Preview CV", on_click=dt_handler))
-                ]))
-            matcher_results_table.visible = True; table_container.visible = True; log_msg(f"Loaded previous report: {os.path.basename(latest_csv)}", "blue")
+                matcher_list_view.controls.append(_matcher_row(
+                    str(p.get('Score', '0')), str(p.get('Name', 'Unknown')),
+                    str(p.get('Verdict', '')), str(p.get('Pros', '')),
+                    str(p.get('Missing Skills', '')), dt_handler
+                ))
+            table_container.visible = True; log_msg(f"Loaded previous report: {os.path.basename(latest_csv)}", "blue")
         except Exception as e: log_msg(f"⚠️ Failed to load previous report: {e}", "orange")
+
+    def on_matcher_row(parsed_item, filename):
+        score_val = str(parsed_item.get('score', 0))
+        def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
+        dt_handler = create_preview_handler(filename)
+        matcher_list_view.controls.append(_matcher_row(
+            score_val, str(parsed_item.get('name', 'Unknown')),
+            str(parsed_item.get('verdict', '')), str(parsed_item.get('pros', '')),
+            str(parsed_item.get('missing_skills', '')), dt_handler
+        ))
+        table_container.visible = True
+        page.update()
+        try:
+            matcher_list_view.scroll_to(offset=-1, duration=100)
+        except Exception:
+            pass
 
     def on_matcher_complete(parsed_all, cands):
         nonlocal last_csv_count
         last_csv_count = len(parsed_all)
-        matcher_results_table.rows.clear()
-        for p in parsed_all:
-            score_val = str(p.get('score', 0)); num_score = safe_int(score_val); score_color = "green" if num_score >= 70 else ("orange" if num_score >= 40 else "red")
-            try: c_idx = int(p.get('id', -1))
-            except (ValueError, TypeError): c_idx = -1
-            fname_orig = cands[c_idx]['file'] if (0 <= c_idx < len(cands)) else "Unknown"
-
-            # --- FACTORY FOR PREVIEW IN MATCHER ---
-            def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
-            dt_handler = create_preview_handler(fname_orig)
-
-            matcher_results_table.rows.append(ft.DataRow(cells=[
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(score_val, weight="bold", color=score_color, size=13), width=50))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('name', 'Unknown')), weight="bold", size=12), width=150))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('verdict', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=200, tooltip=format_tooltip(p.get('verdict', ''))))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('pros', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('pros', ''))))),
-                ft.DataCell(ft.GestureDetector(on_double_tap=dt_handler, content=ft.Container(content=ft.Text(str(p.get('missing_skills', '')), size=12, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS), width=250, tooltip=format_tooltip(p.get('missing_skills', ''))))),
-                ft.DataCell(ft.IconButton(icon=ft.icons.REMOVE_RED_EYE, icon_color="blue", tooltip="Preview CV", on_click=dt_handler))
-            ]))
-        matcher_results_table.visible = True; table_container.visible = True; page.update()
+        page.update()
 
     def run_matcher_action(e):
         if not db_files: return show_snack("Database is empty! Import CVs first.")
         if len(jd_input.value) < 10: return show_snack("Please enter Job Description!")
         if not require_api_key(): return
-        table_container.visible = False; matcher_results_table.visible = False; warning_banner.visible = False
-        run_in_background(run_matcher_task, copy.deepcopy(db_files), jd_input.value, config, WORKSPACE_FOLDERS, task_state, cbs, on_matcher_complete)
+        matcher_list_view.controls.clear(); table_container.visible = True; warning_banner.visible = False
+        page.update()
+        run_in_background(run_matcher_task, copy.deepcopy(db_files), jd_input.value, config, WORKSPACE_FOLDERS, task_state, cbs, on_matcher_complete, on_matcher_row)
 
     btn_analyze = ft.ElevatedButton("Analyze Database", icon="rocket_launch", on_click=run_matcher_action)
     view_matcher = ft.Column([ft.Row([matcher_info, ft.Container(expand=True)]), warning_banner, ft.Text("Paste JD below:", color="grey"), jd_input, ft.Row([btn_analyze, ft.Container(expand=True), ft.ElevatedButton("Open Reports Folder", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["REPORTS"]), color="blue")]), ft.Divider(), table_container], visible=False, expand=True)
@@ -1811,11 +1838,11 @@ def main(page: ft.Page):
     set_show_modify = ft.Switch(label="Show Modify CV", value=config.get("show_modify_tab", False), on_change=lambda e: apply_settings(e=e))
     set_show_tailor = ft.Switch(label="Show CV Tailor", value=config.get("show_tailor_tab", False), on_change=lambda e: apply_settings(e=e))
     set_show_qa = ft.Switch(label="Show AI Core Logic Tab", value=config.get("show_qa_tab", False), on_change=lambda e: apply_settings(e=e))
-    set_active_template = ft.Dropdown(label="Active DOCX Template", options=[ft.dropdown.Option(t) for t in get_available_templates()], value=config.get("active_template", "quantori_classic.docx"), text_size=13, height=50, on_change=lambda e: apply_settings(e=e))
-    set_json_naming = ft.Dropdown(label="JSON Files Naming", options=[ft.dropdown.Option("Source Filename (source.json)"), ft.dropdown.Option("CV_FirstName_LastName.json")], value=config.get("json_naming_template", "CV_FirstName_LastName.json"), text_size=13, height=50)
-    set_export_naming = ft.Dropdown(label="Exported CV Naming", options=[ft.dropdown.Option("Source Filename (source.docx)"), ft.dropdown.Option("CV_FirstName_LastName.docx")], value=config.get("export_naming_template", "CV_FirstName_LastName.docx"), text_size=13, height=50)
-    set_naming = ft.Dropdown(label="Anonymous CV Naming", options=[ft.dropdown.Option("CV FirstName FirstLetter (CV_Alexei_L.docx)"), ft.dropdown.Option("SourceName + _a (source_a.docx)")], value=config.get("naming_template", "CV FirstName FirstLetter (CV_Alexei_L.docx)"), text_size=13, height=50)
-    set_theme = ft.Dropdown(label="App UI Theme", options=[ft.dropdown.Option("Light"), ft.dropdown.Option("Dark")], value=config.get("ui_theme", "Light"), text_size=13, height=50, on_change=lambda e: apply_settings(e=e))
+    set_active_template = ft.Dropdown(label="Active DOCX Template", options=[ft.dropdown.Option(t) for t in get_available_templates()], value=config.get("active_template", "quantori_classic.docx"), text_size=13, height=42, content_padding=ft.padding.only(left=10, right=10, top=4, bottom=4), on_change=lambda e: apply_settings(e=e))
+    set_json_naming = ft.Dropdown(label="JSON Files Naming", options=[ft.dropdown.Option("Source Filename (source.json)"), ft.dropdown.Option("CV_FirstName_LastName.json")], value=config.get("json_naming_template", "CV_FirstName_LastName.json"), text_size=13, height=42, content_padding=ft.padding.only(left=10, right=10, top=4, bottom=4))
+    set_export_naming = ft.Dropdown(label="Exported CV Naming", options=[ft.dropdown.Option("Source Filename (source.docx)"), ft.dropdown.Option("CV_FirstName_LastName.docx")], value=config.get("export_naming_template", "CV_FirstName_LastName.docx"), text_size=13, height=42, content_padding=ft.padding.only(left=10, right=10, top=4, bottom=4))
+    set_naming = ft.Dropdown(label="Anonymous CV Naming", options=[ft.dropdown.Option("CV FirstName FirstLetter (CV_Alexei_L.docx)"), ft.dropdown.Option("SourceName + _a (source_a.docx)")], value=config.get("naming_template", "CV FirstName FirstLetter (CV_Alexei_L.docx)"), text_size=13, height=42, content_padding=ft.padding.only(left=10, right=10, top=4, bottom=4))
+    set_theme = ft.Dropdown(label="App UI Theme", options=[ft.dropdown.Option("Light"), ft.dropdown.Option("Dark")], value=config.get("ui_theme", "Light"), text_size=13, height=42, content_padding=ft.padding.only(left=10, right=10, top=4, bottom=4), on_change=lambda e: apply_settings(e=e))
     
     def rst_bil(e): config["total_in_tokens"] = 0; config["total_out_tokens"] = 0; config["total_spent_usd"] = 0.0; save_config(config); update_billing_ui(); show_snack("Billing reset.")
     btn_reset_billing = ft.ElevatedButton("Reset Billing Counters", icon="refresh", color="red", on_click=rst_bil)
@@ -1823,36 +1850,32 @@ def main(page: ft.Page):
     version_text = ft.Text(f"App Version: {APP_VERSION}", color="grey", size=12)
 
     col_left = ft.Column([
-        ft.Text("API Keys & Core Settings", weight="bold", color="#2196F3"),
+        ft.Text("API Keys & Core Settings", weight="bold", color="#2196F3", size=13),
         set_api,
         set_github_token,
         set_proxy_url,
         ft.Row([set_workspace, btn_browse]),
-        ft.Container(height=10),
-        
-        ft.Text("Import & Processing", weight="bold", color="#2196F3"),
-        ft.Row([set_import_mode, ft.Container(width=20), ft.Column([ft.Container(content=set_generate_docx, padding=ft.padding.only(top=6)), set_autofix_threshold], spacing=10)], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START),
-        ft.Container(height=10),
-        
-        ft.Text("Naming Conventions", weight="bold", color="#2196F3"), 
-        set_json_naming, 
-        set_export_naming, 
+        ft.Container(height=8),
+        ft.Text("Import & Processing", weight="bold", color="#2196F3", size=13),
+        ft.Row([set_import_mode, ft.Container(width=20), ft.Column([ft.Container(content=set_generate_docx, padding=ft.padding.only(top=6)), set_autofix_threshold], spacing=5)], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START),
+        ft.Container(height=8),
+        ft.Text("Naming Conventions", weight="bold", color="#2196F3", size=13),
+        set_json_naming,
+        set_export_naming,
         set_naming,
-    ], expand=True, spacing=10)
+    ], expand=True, spacing=6)
 
     col_right = ft.Column([
-        ft.Text("Anonymization Rules", weight="bold", color="#2196F3"),
-        set_anon_name, 
-        set_anon_creds, 
+        ft.Text("Anonymization Rules", weight="bold", color="#2196F3", size=13),
+        set_anon_name,
+        set_anon_creds,
         set_anon_comps,
-        ft.Container(height=10),
-        
-        ft.Text("DOCX Templates & Formatting", weight="bold", color="#2196F3"), 
+        ft.Container(height=8),
+        ft.Text("DOCX Templates & Formatting", weight="bold", color="#2196F3", size=13),
         set_active_template,
-        ft.Row([set_keep_initial_title, ft.ElevatedButton("Open Templates", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["TEMPLATES"]))]), 
-        ft.Container(height=10), 
-        
-        ft.Text("Advanced Tools", weight="bold", color="#2196F3"),
+        ft.Row([set_keep_initial_title, ft.ElevatedButton("Open Templates", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["TEMPLATES"]))]),
+        ft.Container(height=8),
+        ft.Text("Advanced Tools", weight="bold", color="#2196F3", size=13),
         ft.Column([
             set_show_xray,
             set_show_github,
@@ -1860,21 +1883,21 @@ def main(page: ft.Page):
             set_show_modify,
             set_show_tailor,
             set_show_qa,
-        ], spacing=2),
-        ft.Container(height=10),
-        ft.Text("App Preferences", weight="bold", color="#2196F3"),
+        ], spacing=0),
+        ft.Container(height=8),
+        ft.Text("App Preferences", weight="bold", color="#2196F3", size=13),
         ft.Row([set_theme, btn_reset_billing]),
-    ], expand=True, spacing=10)
+    ], expand=True, spacing=6)
 
     view_settings = ft.Column([
-        ft.Row([ft.Text("Application Settings", size=24, weight="bold"), ft.Container(expand=True), version_text]), 
-        ft.Divider(), 
+        ft.Row([ft.Text("Application Settings", size=20, weight="bold"), ft.Container(expand=True), version_text]),
+        ft.Divider(height=1),
         ft.Row([
             ft.Container(content=col_left, expand=True, padding=ft.padding.only(right=20)),
             ft.VerticalDivider(width=1, color="#eeeeee"),
             ft.Container(content=col_right, expand=True, padding=ft.padding.only(left=10))
         ], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)
-    ], visible=False, expand=True)
+    ], visible=False, expand=True, spacing=4)
 
     # --- INITIALIZATION ---
     nav_rail = ft.NavigationRail(

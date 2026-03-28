@@ -1426,8 +1426,12 @@ def sanitize_json(data):
 
     # Deduplicate experience entries:
     # 1) Exact match by (company_name, role, start_date)
-    # 2) Fuzzy match: same start+end dates AND one company name contains the other
-    #    (catches LLM splitting one role into two entries with reshuffled fields)
+    # 2) Fuzzy match: same/similar dates AND overlapping company name
+    # 3) Same company + same role (catches LLM duplicating with different date formats)
+    def _norm_date(d):
+        """Normalize date string for comparison: strip spaces/dashes, extract year digits."""
+        return re.sub(r'[^a-z0-9]', '', str(d).strip().lower())
+
     seen_exp = set()
     clean_exp = []
     for job in data['experience']:
@@ -1439,19 +1443,25 @@ def sanitize_json(data):
         if key in seen_exp:
             continue
         seen_exp.add(key)
-        # Fuzzy duplicate check: same dates + overlapping company name
-        j_start = str((job.get('dates') or {}).get('start', '')).strip().lower()
-        j_end = str((job.get('dates') or {}).get('end', '')).strip().lower()
+        # Fuzzy duplicate check
+        j_start = _norm_date((job.get('dates') or {}).get('start', ''))
+        j_end = _norm_date((job.get('dates') or {}).get('end', ''))
         j_company = str(job.get('company_name', '')).strip().lower()
+        j_role = str(job.get('role', '')).strip().lower()
         is_fuzzy_dup = False
-        if j_start and j_company:
+        if j_company:
             for existing in clean_exp:
-                e_start = str((existing.get('dates') or {}).get('start', '')).strip().lower()
-                e_end = str((existing.get('dates') or {}).get('end', '')).strip().lower()
+                e_start = _norm_date((existing.get('dates') or {}).get('start', ''))
+                e_end = _norm_date((existing.get('dates') or {}).get('end', ''))
                 e_company = str(existing.get('company_name', '')).strip().lower()
-                if e_start == j_start and e_end == j_end and e_company and (
-                    j_company in e_company or e_company in j_company
-                ):
+                e_role = str(existing.get('role', '')).strip().lower()
+                # Match criteria: overlapping company name AND either:
+                #   a) normalized dates match, OR
+                #   b) same role text (catches date-shuffled duplicates)
+                company_match = e_company and (j_company in e_company or e_company in j_company or j_company == e_company)
+                dates_match = j_start and e_start and (j_start == e_start or j_start in e_start or e_start in j_start) and (j_end == e_end or j_end in e_end or e_end in j_end)
+                role_match = j_role and e_role and j_role == e_role
+                if company_match and (dates_match or role_match):
                     # Merge: keep the entry with more highlights; add missing highlights from duplicate
                     e_hl = existing.get('highlights') or []
                     j_hl = job.get('highlights') or []

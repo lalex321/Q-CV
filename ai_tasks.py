@@ -921,7 +921,7 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
 # ==========================================
 # 5. MATCHER TASK
 # ==========================================
-def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complete_cb):
+def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complete_cb, on_row_cb=None):
     try:
         cbs['progress'](0, "Calculating ETA...", True)
         cbs['log'](f"Running Matcher on {len(cands)} CVs...", "blue")
@@ -959,6 +959,9 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
                 cached_item['id'] = i
                 cached_item['name'] = cand_name
                 parsed_all.append(cached_item)
+                if on_row_cb:
+                    try: on_row_cb(cached_item, cand['file'])
+                    except Exception: pass
                 continue
             
             api_start_time = time.time()
@@ -990,7 +993,10 @@ def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complet
                     parsed_item['jd_hash'] = current_jd_hash
                     cand['data']['match_analysis'] = parsed_item
                     parsed_all.append(parsed_item)
-                    
+                    if on_row_cb:
+                        try: on_row_cb(parsed_item, cand['file'])
+                        except Exception: pass
+
                     try:
                         with open(os.path.join(folders["JSON"], cand['file']), 'w', encoding='utf-8') as jf:
                             json.dump(cand['data'], jf, indent=2, ensure_ascii=False)
