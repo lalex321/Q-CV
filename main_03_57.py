@@ -993,38 +993,51 @@ def main(page: ft.Page):
     miner_results_view = ft.ListView(expand=True, spacing=10)
     btn_mine = ft.ElevatedButton("Start Mining", icon="travel_explore", bgcolor="#2196F3", color="white")
 
+    _gh_import_lock = threading.Lock()
+
     def _import_single_github(login, btn_control):
         if not require_api_key(): return
-        btn_control.disabled = True; btn_control.text = "Importing..."; page.update()
+        if not _gh_import_lock.acquire(blocking=False):
+            show_snack("Another import is in progress, please wait.")
+            return
         try:
+            btn_control.disabled = True; btn_control.text = "Importing..."
+            try: page.update()
+            except Exception: pass
             token = config.get("github_token")
             user_data = gh_api_request(f"/users/{login}", token, cbs)
             repos_data = gh_api_request(f"/users/{login}/repos?sort=updated&per_page=10", token, cbs)
             if not user_data: raise Exception("Failed to fetch user data")
-            
+
             prompt = config.get("prompt_github", DEFAULT_PROMPTS["prompt_github"]).replace("{prompt_schema_only}", CV_JSON_SCHEMA).replace("{gh_full_data}", json.dumps({"user": user_data, "recent_repos": repos_data or []}, ensure_ascii=False))
-            
+
             client = genai.Client(api_key=config.get("api_key"))
             resp = client.models.generate_content(model=MODEL_NAME, contents=prompt)
-            
+
             i_tok = getattr(resp.usage_metadata, 'prompt_token_count', 0); o_tok = getattr(resp.usage_metadata, 'candidates_token_count', 0)
             cost = (i_tok / 1_000_000 * PRICE_1M_IN) + (o_tok / 1_000_000 * PRICE_1M_OUT); update_billing(i_tok, o_tok, cost)
-            
+
             txt = resp.text.replace('```json', '').replace('```', '').strip()
             new_data = sanitize_json(extract_first_json_object(txt))
-            
+
             file_hash = hashlib.md5(login.encode('utf-8')).hexdigest()[:4]
             out_json = f"CV_GitHub_{login}_{file_hash}.json"
-            
+
             domain_gh = "github"
-            new_data['import_date'] = time.time(); new_data['_source_filename'] = f"{domain_gh}.com/{login}"; new_data['_source_hash'] = f"gh_{file_hash}"; new_data['_comment'] = "Source: GitHub" 
-            
+            new_data['import_date'] = time.time(); new_data['_source_filename'] = f"{domain_gh}.com/{login}"; new_data['_source_hash'] = f"gh_{file_hash}"; new_data['_comment'] = "Source: GitHub"
+
             with open(os.path.join(WORKSPACE_FOLDERS["JSON"], out_json), 'w', encoding='utf-8') as f: json.dump(new_data, f, indent=2, ensure_ascii=False)
             log_msg(f"   ✅ Imported {login} to CV Database ({i_tok + o_tok:,} tokens)", "green")
-            btn_control.text = "Imported!"; btn_control.icon = "check"; btn_control.bgcolor = "grey"; page.update()
+            btn_control.text = "Imported!"; btn_control.icon = "check"; btn_control.bgcolor = "grey"
+            try: page.update()
+            except Exception: pass
             load_db_data(); show_snack(f"Successfully imported @{login} to CV database!")
         except Exception as e:
-            log_msg(f"Failed to import GitHub profile {login}: {e}", "red"); btn_control.text = "Error"; btn_control.disabled = False; page.update()
+            log_msg(f"Failed to import GitHub profile {login}: {e}", "red"); btn_control.text = "Error"; btn_control.disabled = False
+            try: page.update()
+            except Exception: pass
+        finally:
+            _gh_import_lock.release()
 
     def on_gh_card_generated(login, name, user_loc, company, email, bio, meta, html_url):
         btn_import_gh = ft.ElevatedButton("Analyze & Import", icon="download", color="white", bgcolor="green", height=30, on_click=lambda e: threading.Thread(target=_import_single_github, args=(login, e.control), daemon=True).start())
@@ -1425,11 +1438,12 @@ def main(page: ft.Page):
     def load_latest_report_to_ui():
         nonlocal last_csv_count
         reports_dir = WORKSPACE_FOLDERS["REPORTS"]
-        csv_files = [os.path.join(reports_dir, f) for f in os.listdir(reports_dir) if f.endswith('.csv')]
-        if not csv_files: last_csv_count = 0; return
+        csv_files = [os.path.join(reports_dir, f) for f in os.listdir(reports_dir) if f.startswith('Ranking_Report_') and f.endswith('.csv')]
+        if not csv_files: last_csv_count = 0; table_container.visible = False; return
         latest_csv = max(csv_files, key=os.path.getmtime)
         try:
             with open(latest_csv, 'r', encoding='utf-8') as f: rows = list(csv.DictReader(f))
+            if not rows or 'Score' not in rows[0]: last_csv_count = 0; table_container.visible = False; return
             last_csv_count = len(rows); matcher_list_view.controls.clear()
             for p in rows:
                 def create_preview_handler(fname): return lambda e: preview_cv_by_filename(fname)
@@ -1440,7 +1454,9 @@ def main(page: ft.Page):
                     str(p.get('Missing Skills', '')), dt_handler
                 ))
             table_container.visible = True; log_msg(f"Loaded previous report: {os.path.basename(latest_csv)}", "blue")
-        except Exception as e: log_msg(f"⚠️ Failed to load previous report: {e}", "orange")
+        except Exception as e:
+            table_container.visible = False
+            log_msg(f"⚠️ Failed to load previous report: {e}", "orange")
 
     def on_matcher_row(parsed_item, filename):
         score_val = str(parsed_item.get('score', 0))
@@ -1500,7 +1516,7 @@ def main(page: ft.Page):
         visible=False,
         border=ft.border.all(1, "#eeeeee"),
         border_radius=4,
-        expand=True,
+        height=400,
         content=ft.Column([qa_header_row, qa_list_view], spacing=0, expand=True),
     )
     qa_report_title = ft.Text("Macro QA Report", weight="bold", visible=False)
@@ -1517,7 +1533,7 @@ def main(page: ft.Page):
         padding=10,
         border=ft.border.all(1, "#eeeeee"),
         border_radius=5,
-        content=ft.Column([qa_results_title, qa_table_box, qa_report_title, qa_report_box], spacing=8, expand=True, scroll="auto")
+        content=ft.Column([qa_results_title, qa_table_box, qa_report_title, qa_report_box], spacing=8, scroll="auto")
     )
 
     def _pct(v):

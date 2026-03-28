@@ -1371,6 +1371,43 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
 
             cbs['progress'](i / total_items, f"Tailoring {current_idx}/{total_items}: {cand_name}{eta_str}", True)
 
+            # --- Pre-screen: quick relevance check ---
+            cand_title = str(item['data']['basics'].get('current_title', '')).strip()
+            cand_skills = item['data'].get('skills', {})
+            skills_flat = ", ".join(s for cat in cand_skills.values() if isinstance(cat, list) for s in cat[:10])
+            screen_prompt = (
+                f"Rate how relevant this candidate is to the job description. "
+                f"Reply with ONLY one word: HIGH, MEDIUM, or LOW.\n\n"
+                f"Candidate: {cand_name}, {cand_title}\nSkills: {skills_flat[:500]}\n\n"
+                f"Job Description (first 1000 chars):\n{jd_text[:1000]}"
+            )
+            try:
+                screen_resp = _retry_generate(client, MODEL_NAME, screen_prompt)
+                s_in = getattr(screen_resp.usage_metadata, 'prompt_token_count', 0)
+                s_out = getattr(screen_resp.usage_metadata, 'candidates_token_count', 0)
+                s_cost = (s_in / 1_000_000 * PRICE_1M_IN) + (s_out / 1_000_000 * PRICE_1M_OUT)
+                session_cost += s_cost
+                cbs['billing'](s_in, s_out, s_cost)
+                relevance = (screen_resp.text or '').strip().upper()
+                # Normalize: extract first word that matches
+                for word in relevance.split():
+                    if word in ('HIGH', 'MEDIUM', 'LOW'):
+                        relevance = word
+                        break
+                else:
+                    relevance = 'MEDIUM'
+            except Exception:
+                relevance = 'MEDIUM'  # on error, proceed with tailoring
+
+            if relevance == 'LOW':
+                cbs['log'](f"   ⏭️ Skipped: {cand_name} — not relevant to JD", "orange")
+                if on_row_update:
+                    on_row_update(cand_name, "⏭️ Skip", f"Candidate not relevant to JD (Relevance: LOW). Title: {cand_title}", "")
+                item['_status'] = None
+                item['selected'] = False
+                cbs['render']()
+                continue
+
             input_json_str = json.dumps(item['data'], ensure_ascii=False)
             prompt = config.get("prompt_tailor", DEFAULT_PROMPTS["prompt_tailor"]).replace("{jd_text}", jd_text).replace("{input_json_str}", input_json_str)
 
@@ -1406,7 +1443,7 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
 
                 cbs['log'](f"   ✅ Tailored & Saved: {out_filename} ({i_tok + o_tok:,} tokens)", "green")
                 if on_row_update:
-                    on_row_update(cand_name, "✅ Done", tailoring_notes, out_filename)
+                    on_row_update(cand_name, "✅ Done", f"Relevance: {relevance}. {tailoring_notes}", out_filename)
 
             except Exception as ex:
                 err = str(ex)
