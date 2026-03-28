@@ -1327,27 +1327,6 @@ def sanitize_json(data):
             
     data['basics']['current_title'] = clean_title
 
-    # Preserve academic degree suffix in name (PhD, MD, etc.) if found in education or title
-    _name = data['basics'].get('name', '')
-    if _name and not re.search(r'\b(PhD|Ph\.?D\.?|MD|M\.D\.?|DSc|D\.Sc\.?)\b', _name, re.IGNORECASE):
-        _has_degree = False
-        for edu in data.get('education', []):
-            deg = str(edu.get('degree', '')).lower()
-            if any(d in deg for d in ['phd', 'ph.d', 'doctorate', 'доктор наук', 'кандидат наук']):
-                _name = f"{_name}, PhD"
-                _has_degree = True
-                break
-            elif deg.startswith('md') or 'm.d.' in deg:
-                _name = f"{_name}, MD"
-                _has_degree = True
-                break
-        if not _has_degree:
-            # Check current_title_original for degree
-            _orig_title = str(data['basics'].get('current_title_original', '')).strip()
-            if re.search(r'\b(PhD|Ph\.?D\.?)\b', _orig_title, re.IGNORECASE):
-                _name = f"{_name}, PhD"
-        data['basics']['name'] = _name
-
     if not isinstance(data['basics'].get('contacts'), dict): data['basics']['contacts'] = {}
     clean_contacts = {}
     for k, v in data['basics']['contacts'].items():
