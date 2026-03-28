@@ -1352,7 +1352,7 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
 # ==========================================
 # 8. CV TAILOR TASK
 # ==========================================
-def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, anonymize=False, on_row_update=None):
+def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, anonymize=False, on_row_update=None, skip_irrelevant=True):
     try:
         total_items = len(items)
         cbs['progress'](0, "Calculating ETA...", True)
@@ -1377,42 +1377,45 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
 
             cbs['progress'](i / total_items, f"Tailoring {current_idx}/{total_items}: {cand_name}{eta_str}", True)
 
-            # --- Pre-screen: quick relevance check ---
+            # --- Pre-screen: quick relevance check (optional) ---
             cand_title = str(item['data']['basics'].get('current_title', '')).strip()
-            cand_skills = item['data'].get('skills', {})
-            skills_flat = ", ".join(s for cat in cand_skills.values() if isinstance(cat, list) for s in cat[:10])
-            screen_prompt = (
-                f"Rate how relevant this candidate is to the job description. "
-                f"Reply with ONLY one word: HIGH, MEDIUM, or LOW.\n\n"
-                f"Candidate: {cand_name}, {cand_title}\nSkills: {skills_flat[:500]}\n\n"
-                f"Job Description (first 1000 chars):\n{jd_text[:1000]}"
-            )
-            try:
-                screen_resp = _retry_generate(client, MODEL_NAME, screen_prompt)
-                s_in = getattr(screen_resp.usage_metadata, 'prompt_token_count', 0)
-                s_out = getattr(screen_resp.usage_metadata, 'candidates_token_count', 0)
-                s_cost = (s_in / 1_000_000 * PRICE_1M_IN) + (s_out / 1_000_000 * PRICE_1M_OUT)
-                session_cost += s_cost
-                cbs['billing'](s_in, s_out, s_cost)
-                relevance = (screen_resp.text or '').strip().upper()
-                # Normalize: extract first word that matches
-                for word in relevance.split():
-                    if word in ('HIGH', 'MEDIUM', 'LOW'):
-                        relevance = word
-                        break
-                else:
+            relevance = 'HIGH'
+            if skip_irrelevant:
+                cand_skills = item['data'].get('skills', {})
+                skills_flat = ", ".join(s for cat in cand_skills.values() if isinstance(cat, list) for s in cat[:10])
+                screen_prompt = (
+                    f"Does this candidate have ANY transferable skills or experience relevant to the job description? "
+                    f"Be lenient — if there is even partial overlap in technologies, domain, or role type, answer HIGH or MEDIUM. "
+                    f"Only answer LOW if the candidate's background is completely unrelated (e.g. a farmer applying for a software role). "
+                    f"Reply with ONLY one word: HIGH, MEDIUM, or LOW.\n\n"
+                    f"Candidate: {cand_name}, {cand_title}\nSkills: {skills_flat[:500]}\n\n"
+                    f"Job Description (first 1000 chars):\n{jd_text[:1000]}"
+                )
+                try:
+                    screen_resp = _retry_generate(client, MODEL_NAME, screen_prompt)
+                    s_in = getattr(screen_resp.usage_metadata, 'prompt_token_count', 0)
+                    s_out = getattr(screen_resp.usage_metadata, 'candidates_token_count', 0)
+                    s_cost = (s_in / 1_000_000 * PRICE_1M_IN) + (s_out / 1_000_000 * PRICE_1M_OUT)
+                    session_cost += s_cost
+                    cbs['billing'](s_in, s_out, s_cost)
+                    relevance = (screen_resp.text or '').strip().upper()
+                    for word in relevance.split():
+                        if word in ('HIGH', 'MEDIUM', 'LOW'):
+                            relevance = word
+                            break
+                    else:
+                        relevance = 'MEDIUM'
+                except Exception:
                     relevance = 'MEDIUM'
-            except Exception:
-                relevance = 'MEDIUM'  # on error, proceed with tailoring
 
-            if relevance == 'LOW':
-                cbs['log'](f"   ⏭️ Skipped: {cand_name} — not relevant to JD", "orange")
-                if on_row_update:
-                    on_row_update(cand_name, "⏭️ Skip", f"Candidate not relevant to JD (Relevance: LOW). Title: {cand_title}", "")
-                item['_status'] = None
-                item['selected'] = False
-                cbs['render']()
-                continue
+                if relevance == 'LOW':
+                    cbs['log'](f"   ⏭️ Skipped: {cand_name} — not relevant to JD", "orange")
+                    if on_row_update:
+                        on_row_update(cand_name, "⏭️ Skip", f"Candidate not relevant to JD (Relevance: LOW). Title: {cand_title}", "")
+                    item['_status'] = None
+                    item['selected'] = False
+                    cbs['render']()
+                    continue
 
             input_json_str = json.dumps(item['data'], ensure_ascii=False)
             prompt = config.get("prompt_tailor", DEFAULT_PROMPTS["prompt_tailor"]).replace("{jd_text}", jd_text).replace("{input_json_str}", input_json_str)
@@ -1440,7 +1443,7 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
                     session_cost += a_cost
                     cbs['billing'](a_in, a_out, a_cost)
                     out_filename = f"{base_name}_tailored_a{ext}"
-                    target_path = os.path.join(folders["BLIND"], out_filename)
+                    target_path = os.path.join(folders["TAILORED"], out_filename)
                     generate_docx_from_json(anon_data, target_path, config)
                 else:
                     out_filename = f"{base_name}_tailored{ext}"
@@ -1465,8 +1468,7 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
         for item in db_files: item['selected'] = False
         if session_cost > 0:
             cbs['log'](f"Tailoring Session Complete", "blue")
-            folder = folders["BLIND"] if anonymize else folders["TAILORED"]
-            cbs['snack']("CV Tailoring complete!", "Open Folder", folder)
+            cbs['snack']("CV Tailoring complete!", "Open Folder", folders["TAILORED"])
     finally:
         cbs['progress'](0, "", False)
         cbs['render']()

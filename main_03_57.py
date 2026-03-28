@@ -919,6 +919,7 @@ def main(page: ft.Page):
         on_change=lambda e: save_config(config.update({"last_tailor_jd": e.control.value}) or config)
     )
     tailor_anonymize_cb = ft.Checkbox(label="Anonymize", value=config.get("tailor_anonymize", False), on_change=lambda e: save_config(config.update({"tailor_anonymize": e.control.value}) or config))
+    tailor_skip_irrelevant_cb = ft.Checkbox(label="Skip irrelevant", value=config.get("tailor_skip_irrelevant", True), tooltip="Pre-screen candidates and skip those completely unrelated to JD", on_change=lambda e: save_config(config.update({"tailor_skip_irrelevant": e.control.value}) or config))
     btn_run_tailor = ft.ElevatedButton("Tailor & Generate CV", icon="tune", bgcolor="#4CAF50", color="white")
 
     _TL_W_NAME = 180
@@ -976,7 +977,7 @@ def main(page: ft.Page):
         tailor_list_view.controls.clear()
         tailor_table_container.visible = False
         page.update()
-        run_in_background(run_tailor_task, items, tailor_jd_input.value, config, WORKSPACE_FOLDERS, task_state, db_files, cbs, tailor_anonymize_cb.value, on_tailor_row_update)
+        run_in_background(run_tailor_task, items, tailor_jd_input.value, config, WORKSPACE_FOLDERS, task_state, db_files, cbs, tailor_anonymize_cb.value, on_tailor_row_update, tailor_skip_irrelevant_cb.value)
     btn_run_tailor.on_click = act_run_tailor
 
     view_tailor = ft.Column([
@@ -984,7 +985,7 @@ def main(page: ft.Page):
         ft.Text("Select CVs in the 'CVs' tab, paste a Job Description, and generate tailored versions.", color="grey"),
         ft.Text("Paste JD below:", color="grey"),
         tailor_jd_input,
-        ft.Row([btn_run_tailor, tailor_anonymize_cb, ft.Container(expand=True),
+        ft.Row([btn_run_tailor, tailor_anonymize_cb, tailor_skip_irrelevant_cb, ft.Container(expand=True),
                 ft.ElevatedButton("Open Tailored Folder", icon="folder_open", on_click=lambda _: open_folder(WORKSPACE_FOLDERS["TAILORED"]), color="blue")]),
         ft.Divider(),
         tailor_table_container,
@@ -1023,6 +1024,23 @@ def main(page: ft.Page):
 
             txt = resp.text.replace('```json', '').replace('```', '').strip()
             new_data = sanitize_json(extract_first_json_object(txt))
+
+            # Translation pipeline (same as regular import)
+            api_key_val = config.get("api_key", "")
+            try:
+                from cv_engine import translate_full_json_via_llm, translate_remaining_strings_via_llm
+                full_tr = translate_full_json_via_llm(new_data, api_key_val)
+                if full_tr:
+                    log_msg(f"   🌐 {full_tr}", "blue")
+                    new_data = sanitize_json(new_data)
+            except Exception:
+                pass
+            try:
+                str_changes = translate_remaining_strings_via_llm(new_data, api_key_val)
+                if str_changes:
+                    log_msg(f"   🔤 Translated: {', '.join(str_changes[:5])}", "blue")
+            except Exception:
+                pass
 
             file_hash = hashlib.md5(login.encode('utf-8')).hexdigest()[:4]
             out_json = f"CV_GitHub_{login}_{file_hash}.json"
