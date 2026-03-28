@@ -280,12 +280,19 @@ QA AUDIT REPORT (ERRORS TO FIX):
 {qa_report_text}
 
 INSTRUCTIONS:
-1. Look at the original attached CV file/text.
-2. Fix ONLY the missing data or hallucinations mentioned in the QA report.
+1. Look at the original attached CV file/text carefully.
+2. Fix ONLY the issues mentioned in the QA report. Common issues to fix:
+   - **HALLUCINATED NAME SUFFIXES:** If the report says PhD/MD was added to basics.name but the original CV header does NOT show it next to the name — REMOVE the suffix from basics.name. Only keep it if the CV explicitly shows "Name, PhD" in the header.
+   - **TYPOS & MISSPELLINGS:** Fix any typos introduced during extraction (e.g., "COVID-119" → "COVID-19", "Posgtres" → "Postgres", "Hydelabad" → "Hyderabad"). Compare with the original CV text.
+   - **MISSING DATA:** Restore any data mentioned in the QA report as missing — skills, dates, highlights, contact info. Extract from the original CV.
+   - **WRONG DATES:** If the report flags incorrect dates, check the original CV and correct them.
+   - **SKILL MISCATEGORIZATION:** If skills are in wrong categories (e.g., programming languages under "Tools"), move them to the correct category.
+   - **EXPERIENCE MIX-UPS:** If highlights from one role ended up in another role, move them to the correct experience entry.
+   - **FABRICATED CONTENT:** Remove any content flagged as hallucinated that does not exist in the original CV.
 3. Maintain the EXACT same JSON schema as the CURRENT JSON.
 4. Do NOT remove any existing correct data.
-5. Do NOT add new highlights, achievements, or responsibilities that are not explicitly present in the original CV. Only restore text that was missed during extraction.
-6. Place restored data into its CORRECT schema location. Education years go into `education[].year`, not into `other_sections`. Degrees go into `education[].degree`, not elsewhere.
+5. Do NOT add new content not present in the original CV. Only restore missed data or fix errors.
+6. Place restored data into its CORRECT schema location.
 7. Return ONLY the repaired JSON object without markdown wrappers.""",
 
     "prompt_matcher": """Act as a Senior IT Recruiter. Evaluate the candidate against the Job Description.
