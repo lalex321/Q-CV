@@ -160,7 +160,7 @@ def fix_docx_path_bug():
 fix_docx_path_bug()
 # ==========================================
 
-MODEL_NAME = 'gemini-2.0-flash'
+MODEL_NAME = 'gemini-2.5-flash-preview-05-20'
 APP_VERSION = "03.57"
 
 # 💸 GEMINI 2.0 FLASH PRICE LIST (Per 1 Million Tokens)
@@ -323,24 +323,33 @@ CRITICAL RULES:
 INPUT JSON:
 {input_json_str}""",
 
-    "prompt_tailor": """You are an Expert CV Tailoring Specialist. Your task is to tailor the provided Candidate JSON to best match the given Job Description (JD), WITHOUT inventing any new experience, skills, or achievements.
+    "prompt_tailor": """You are an Expert CV Tailoring Specialist. Your task is to ACTIVELY REWRITE and REORDER the provided Candidate JSON to best match the given Job Description (JD). Do NOT just copy the CV — you MUST make visible changes. Do NOT invent new experience, skills, or achievements.
 
 JOB DESCRIPTION:
 {jd_text}
 
-TAILORING RULES:
-1. Return ONLY a valid JSON object with exactly TWO top-level keys:
-   - "_tailoring_notes": a 2-3 sentence plain-English summary of specific changes made (e.g. "Promoted AWS and Docker skills to top. Reordered highlights in Dart Neuroscience to emphasize data pipeline work. Summary rewritten to highlight .NET and cloud experience. Relevance: HIGH.")
-   - "cv": the complete tailored CV JSON (same schema as input)
-2. No markdown, no explanations — raw JSON only.
-3. Inside "cv" — keep the EXACT same schema as the input JSON. Do not remove mandatory keys.
-4. RELEVANCE ASSESSMENT: Before tailoring, assess how relevant this candidate is to the JD. Include "Relevance: HIGH/MEDIUM/LOW" at the end of _tailoring_notes. Even for LOW relevance candidates, still do your best to highlight any transferable skills.
-5. SUMMARY: Rewrite cv.summary.bullet_points to strongly emphasize aspects matching the JD. Use JD keywords and phrases naturally. Connect the candidate's experience to JD requirements explicitly. Do not fabricate achievements.
-6. SKILLS: Reorder skill categories and individual items so the most JD-relevant ones appear first. Merge small categories if it improves readability. Do not add skills not present in the original.
-7. EXPERIENCE highlights: For each role, reorder bullet points so the most JD-relevant ones come first. Rephrase highlights to use JD terminology where the meaning is preserved. Trim highlights clearly irrelevant to the JD (set to [] only if ALL highlights are irrelevant). Never invent new highlights.
-8. EXPERIENCE order: keep chronological order. Do NOT change: name, contacts, dates, company names, role titles, education, certifications.
-9. DEDUPLICATION: If the input JSON contains duplicate experience entries (same company + similar dates), keep only one and merge their highlights.
-10. Output cv content in professional US English.
+MANDATORY TAILORING ACTIONS (you MUST do ALL of these):
+
+1. **OUTPUT FORMAT:** Return ONLY a valid JSON object with exactly TWO top-level keys:
+   - "_tailoring_notes": 2-3 sentences listing SPECIFIC changes you made. End with "Relevance: HIGH/MEDIUM/LOW".
+   - "cv": the complete tailored CV JSON (same schema as input).
+   No markdown, no explanations — raw JSON only.
+
+2. **REWRITE SUMMARY (MANDATORY):** You MUST rewrite cv.summary.bullet_points from scratch. Create 4-6 bullet points that directly connect the candidate's real experience to JD requirements. Use JD keywords naturally. Each bullet should address a specific JD requirement using the candidate's actual background. Do NOT copy the original summary unchanged.
+
+3. **REORDER SKILLS (MANDATORY):** Move skill categories and items most relevant to the JD to the TOP. If the JD mentions AWS and the candidate has AWS buried in a list — move it to position #1. Merge small or redundant skill categories.
+
+4. **REORDER & REPHRASE HIGHLIGHTS (MANDATORY):** For EACH role:
+   - Put JD-relevant highlights FIRST.
+   - Rephrase highlights to use JD terminology where the meaning is preserved (e.g., if JD says "microservices" and highlight says "distributed systems" — use "microservices architecture").
+   - Trim highlights clearly irrelevant to the JD. Set highlights to [] ONLY if ALL are irrelevant.
+   - NEVER invent new highlights.
+
+5. **PRESERVE:** Keep chronological experience order. Do NOT change: name, contacts, dates, company names, role titles, education, certifications. Keep the EXACT same JSON schema.
+
+6. **DEDUPLICATION:** If duplicate experience entries exist (same company + similar dates), merge into one.
+
+7. Output all cv content in professional US English.
 
 INPUT JSON:
 {input_json_str}""",
