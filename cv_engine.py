@@ -1539,30 +1539,26 @@ def sanitize_json(data):
             data['skills']['Tools & Technologies'] = env_skills
 
     # Enrich experience environment from highlights: extract tech terms mentioned inline
-    _known_tech_lower = set()
+    # Only match well-defined tech terms (tools, frameworks, languages) using word boundaries
+    _known_tech_lower = {}  # lowercase -> original case
     for items in data.get('skills', {}).values():
         if isinstance(items, list):
-            _known_tech_lower.update(s.lower().strip() for s in items if isinstance(s, str) and len(s) > 1)
+            for s in items:
+                if isinstance(s, str) and len(s.strip()) > 2:
+                    _known_tech_lower[s.lower().strip()] = s.strip()
     for job in data.get('experience', []):
         env = job.get('environment') or []
         env_lower = {e.lower().strip() for e in env}
-        # Scan highlights and project_description for known tech terms
         text_parts = list(job.get('highlights') or [])
         if job.get('project_description'):
             text_parts.append(job['project_description'])
-        combined_text = ' '.join(str(t) for t in text_parts).lower()
-        for tech in _known_tech_lower:
-            if len(tech) > 2 and tech not in env_lower and tech in combined_text:
-                # Find original-case version from skills
-                orig = tech
-                for items in data.get('skills', {}).values():
-                    if isinstance(items, list):
-                        for s in items:
-                            if isinstance(s, str) and s.lower().strip() == tech:
-                                orig = s.strip()
-                                break
-                env.append(orig)
-                env_lower.add(tech)
+        combined_text = ' '.join(str(t) for t in text_parts)
+        for tech_lower, tech_orig in _known_tech_lower.items():
+            if tech_lower not in env_lower:
+                # Use word boundary matching to avoid partial matches
+                if re.search(r'\b' + re.escape(tech_lower) + r'\b', combined_text, re.IGNORECASE):
+                    env.append(tech_orig)
+                    env_lower.add(tech_lower)
         job['environment'] = env
 
     if not isinstance(data.get('projects'), list): data['projects'] = []
