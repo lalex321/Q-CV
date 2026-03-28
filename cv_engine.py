@@ -225,7 +225,7 @@ DEFAULT_PROMPTS = {
 6. **CONTACTS, LINKS, LOCATIONS:** Extract all explicit phone numbers, emails, LinkedIn, GitHub, portfolio, websites, WhatsApp, and other links, plus the most granular explicit location. Do not infer location from vague context or company headquarters. **SOCIAL HANDLES:** If the CV shows a username/handle next to a social-media icon (LinkedIn, GitHub, etc.) without a full URL, reconstruct the full URL: `https://linkedin.com/in/<handle>`, `https://github.com/<handle>`, etc. Never store a bare handle like `https://username` — always include the platform domain.
 7. **WORK EXPERIENCE INTEGRITY:** Merge all employment history into the single `experience` array, even if the CV splits it into multiple employment sections. Preserve explicit company, role title, dates, location, highlights, responsibilities, achievements, project details, and environment. Do not split one role unless clearly shown. Do not duplicate roles. Do not confuse role title with company name. If a role has only a duration (e.g. `6 years 5 months`) but no start/end dates, put the duration string into `dates.start` and leave `dates.end` as `""`.
 8. **CURRENT TITLE & NAME NORMALIZATION:** Preserve `basics.current_title` as close as possible to the resume header wording. Extract the real display name if explicit; if not, and the email clearly contains a safe `firstname.lastname` pattern, normalize it into a human-readable name. Do not invent beyond that.
-9. **CANONICAL SECTION ROUTING:** Core content must go only into its canonical sections: `basics`, `summary`, `skills`, `experience`, `education`, `certifications`, `languages`. Degrees must go to `education`, certifications to `certifications`, and language items with proficiency/test details to `languages`.
+9. **CANONICAL SECTION ROUTING:** Core content must go only into its canonical sections: `basics`, `summary`, `skills`, `experience`, `education`, `certifications`, `languages`. Degrees must go to `education`, certifications to `certifications`, and language items with proficiency/test details to `languages`. **SKILLS SECTION DETECTION:** Sections titled "Technical Expertise", "Technical Skills", "Core Competencies", "Technologies", "Tech Stack", or similar MUST be parsed into the `skills` dict, NOT placed in `other_sections`. Parse "Category: item1, item2" patterns into `{"Category": ["item1", "item2"]}`.
 10. **OTHER_SECTIONS ONLY:** Any remaining non-core content must go only into `other_sections`. Do not create, use, or reference `custom_sections`.
 11. **CLEAN OUTPUT:** Use only empty strings `""` or arrays `[]` for missing values. Never output `None`, `null`, or placeholders. Keep wording faithful to the source but readable in professional US English. Avoid accidental ALL CAPS except for true acronyms or proper names.
 
@@ -1318,6 +1318,27 @@ def sanitize_json(data):
             
     data['basics']['current_title'] = clean_title
 
+    # Preserve academic degree suffix in name (PhD, MD, etc.) if found in education or title
+    _name = data['basics'].get('name', '')
+    if _name and not re.search(r'\b(PhD|Ph\.?D\.?|MD|M\.D\.?|DSc|D\.Sc\.?)\b', _name, re.IGNORECASE):
+        _has_degree = False
+        for edu in data.get('education', []):
+            deg = str(edu.get('degree', '')).lower()
+            if any(d in deg for d in ['phd', 'ph.d', 'doctorate', 'доктор наук', 'кандидат наук']):
+                _name = f"{_name}, PhD"
+                _has_degree = True
+                break
+            elif deg.startswith('md') or 'm.d.' in deg:
+                _name = f"{_name}, MD"
+                _has_degree = True
+                break
+        if not _has_degree:
+            # Check current_title_original for degree
+            _orig_title = str(data['basics'].get('current_title_original', '')).strip()
+            if re.search(r'\b(PhD|Ph\.?D\.?)\b', _orig_title, re.IGNORECASE):
+                _name = f"{_name}, PhD"
+        data['basics']['name'] = _name
+
     if not isinstance(data['basics'].get('contacts'), dict): data['basics']['contacts'] = {}
     clean_contacts = {}
     for k, v in data['basics']['contacts'].items():
@@ -1517,6 +1538,33 @@ def sanitize_json(data):
         else:
             data['skills']['Tools & Technologies'] = env_skills
 
+    # Enrich experience environment from highlights: extract tech terms mentioned inline
+    _known_tech_lower = set()
+    for items in data.get('skills', {}).values():
+        if isinstance(items, list):
+            _known_tech_lower.update(s.lower().strip() for s in items if isinstance(s, str) and len(s) > 1)
+    for job in data.get('experience', []):
+        env = job.get('environment') or []
+        env_lower = {e.lower().strip() for e in env}
+        # Scan highlights and project_description for known tech terms
+        text_parts = list(job.get('highlights') or [])
+        if job.get('project_description'):
+            text_parts.append(job['project_description'])
+        combined_text = ' '.join(str(t) for t in text_parts).lower()
+        for tech in _known_tech_lower:
+            if len(tech) > 2 and tech not in env_lower and tech in combined_text:
+                # Find original-case version from skills
+                orig = tech
+                for items in data.get('skills', {}).values():
+                    if isinstance(items, list):
+                        for s in items:
+                            if isinstance(s, str) and s.lower().strip() == tech:
+                                orig = s.strip()
+                                break
+                env.append(orig)
+                env_lower.add(tech)
+        job['environment'] = env
+
     if not isinstance(data.get('projects'), list): data['projects'] = []
     clean_projects = []
     for p in data['projects']:
@@ -1619,6 +1667,39 @@ def sanitize_json(data):
         if not title and not items:
             return None
         return {"title": title, "items": items}
+
+    # Rescue skills-like sections from other_sections into skills dict
+    _skills_like_titles = {'technical expertise', 'technical skills', 'core competencies',
+                           'technologies', 'tech stack', 'tools and technologies',
+                           'tools & technologies', 'competencies', 'key skills',
+                           'professional skills', 'areas of expertise'}
+    rescued_other = []
+    for sec in data.get('other_sections', []):
+        norm = _normalize_other_section(sec, title_keys=("title", "section_title"))
+        if not norm:
+            continue
+        sec_title_lower = norm["title"].strip().lower()
+        if sec_title_lower in _skills_like_titles and norm.get("items"):
+            # Parse "Category: item1, item2" patterns into skills dict
+            for item in norm["items"]:
+                if ':' in item:
+                    cat, vals = item.split(':', 1)
+                    cat = cat.strip()
+                    parsed = [v.strip() for v in vals.split(',') if v.strip()]
+                    if parsed:
+                        if cat in data['skills']:
+                            existing_lower = {s.lower() for s in data['skills'][cat]}
+                            for v in parsed:
+                                if v.lower() not in existing_lower:
+                                    data['skills'][cat].append(v)
+                        else:
+                            data['skills'][cat] = parsed
+                else:
+                    # Single item without category — add to general
+                    data['skills'].setdefault('General', []).append(item.strip())
+            continue
+        rescued_other.append(norm)
+    data['other_sections'] = rescued_other
 
     # If basics.summary is empty, rescue content from summary-like other_sections before filtering
     _summary_like = {'summary', 'summary of qualifications', 'professional summary',
@@ -2187,11 +2268,47 @@ def smart_anonymize_data(data, api_key, cfg):
         name = blind.get('basics', {}).get('name', '')
         if name:
             parts = name.split()
-            blind['basics']['name'] = f"{parts[0]} {parts[1][0]}." if len(parts) > 1 else "Candidate"
-    
+            # Preserve academic degrees (PhD, Ph.D., MD, etc.) in anonymized name
+            _degree_patterns = {'phd', 'ph.d.', 'ph.d', 'md', 'm.d.', 'dsc', 'd.sc.', 'dr.'}
+            degrees = [p for p in parts if p.lower().rstrip('.,') in _degree_patterns]
+            name_parts = [p for p in parts if p.lower().rstrip('.,') not in _degree_patterns]
+            anon_name = f"{name_parts[0]} {name_parts[1][0]}." if len(name_parts) > 1 else "Candidate"
+            # If no degree in name, check education for PhD/MD
+            if not degrees:
+                for edu in blind.get('education', []):
+                    deg = str(edu.get('degree', '')).lower()
+                    if 'phd' in deg or 'ph.d' in deg or 'doctorate' in deg or 'доктор' in deg:
+                        degrees.append('PhD')
+                        break
+                    elif deg.startswith('md') or 'm.d.' in deg:
+                        degrees.append('MD')
+                        break
+            if degrees:
+                # Deduplicate
+                seen = set()
+                unique_degrees = []
+                for d in degrees:
+                    dl = d.lower().rstrip('.,')
+                    if dl not in seen:
+                        seen.add(dl)
+                        unique_degrees.append(d)
+                anon_name = f"{anon_name}, {' '.join(unique_degrees)}"
+            blind['basics']['name'] = anon_name
+
     if cfg.get("anon_remove_creds", True):
         if 'contacts' in blind.get('basics', {}): blind['basics']['contacts'] = {}
         if 'links' in blind.get('basics', {}): blind['basics']['links'] = []
+
+    # Anonymize publications: replace list with summary count
+    for section_list in [blind.get('other_sections', [])]:
+        for sec in section_list:
+            if not isinstance(sec, dict):
+                continue
+            title_lower = str(sec.get('title', '')).strip().lower()
+            if any(kw in title_lower for kw in ('publication', 'paper', 'conference proceeding')):
+                pub_count = len(sec.get('items', []))
+                if pub_count > 0:
+                    sec['items'] = [f"Author and co-author of {pub_count} publications in peer-reviewed scientific journals and conference proceedings."]
     
     if cfg.get("anon_mask_companies", True):
         experiences = blind.get('experience', [])

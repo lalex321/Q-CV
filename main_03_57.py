@@ -552,12 +552,16 @@ def main(page: ft.Page):
             else: warning_banner.visible = False
         page.update()
 
+    _degree_suffixes_re = re.compile(r',?\s*\b(PhD|Ph\.?D\.?|MD|M\.D\.?|DSc|D\.Sc\.?|Dr\.?)\b\.?', re.IGNORECASE)
+
     def get_target_filename(item, ext=".docx"):
         export_pref = config.get("export_naming_template", "Source Filename (source.docx)")
         if export_pref == "CV_FirstName_LastName.docx":
             full_name = item['data'].get('basics', {}).get('name', '')
             if full_name and full_name.lower() not in ['unknown', 'candidate', '']:
-                safe_name = re.sub(r'[^\w\s-]', '', full_name).strip()
+                # Strip degree suffixes before generating filename
+                clean_name = _degree_suffixes_re.sub('', full_name).strip()
+                safe_name = re.sub(r'[^\w\s-]', '', clean_name).strip()
                 parts = safe_name.split()
                 if len(parts) >= 2: return f"CV_{parts[0]}_{parts[-1]}{ext}"
                 elif len(parts) == 1: return f"CV_{parts[0]}{ext}"
