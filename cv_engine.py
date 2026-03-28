@@ -71,7 +71,7 @@ def _trim_strings_deep(value):
     if isinstance(value, list):
         return [_trim_strings_deep(v) for v in value]
     if isinstance(value, dict):
-        return {k: _trim_strings_deep(v) for k, v in value.items()}
+        return {_trim_strings_deep(k) if isinstance(k, str) else k: _trim_strings_deep(v) for k, v in value.items()}
     return value
 
 warnings.filterwarnings("ignore")
