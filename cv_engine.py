@@ -2297,8 +2297,9 @@ def smart_anonymize_data(data, api_key, cfg):
                 continue
             title_lower = str(sec.get('title', '')).strip().lower()
             if any(kw in title_lower for kw in ('publication', 'paper', 'conference proceeding')):
-                pub_count = len(sec.get('items', []))
-                if pub_count > 0:
+                items = sec.get('items', [])
+                if items and not (len(items) == 1 and str(items[0]).startswith("Author and co-author")):
+                    pub_count = len(items)
                     sec['items'] = [f"Author and co-author of {pub_count} publications in peer-reviewed scientific journals and conference proceedings."]
     
     if cfg.get("anon_mask_companies", True):

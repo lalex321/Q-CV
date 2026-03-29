@@ -1352,6 +1352,44 @@ def run_modify_task(items, user_req, config, folders, task_state, db_files, cbs)
 # ==========================================
 # 8. CV TAILOR TASK
 # ==========================================
+
+def _check_relevance(data: dict, jd_text: str) -> str:
+    """Deterministic relevance check: compare CV skills/roles with JD keywords."""
+    jd_words = set(w.lower() for w in re.findall(r'[A-Za-z#+.]{3,}', jd_text))
+    cv_terms: set[str] = set()
+    for cat_items in (data.get("skills") or {}).values():
+        if isinstance(cat_items, list):
+            for s in cat_items:
+                cv_terms.update(w.lower() for w in re.findall(r'[A-Za-z#+.]{3,}', str(s)))
+    for exp in (data.get("experience") or []):
+        cv_terms.update(w.lower() for w in re.findall(r'[A-Za-z#+.]{3,}', str(exp.get("role", ""))))
+        for env_item in (exp.get("environment") or []):
+            cv_terms.update(w.lower() for w in re.findall(r'[A-Za-z#+.]{3,}', str(env_item)))
+    cv_terms.update(w.lower() for w in re.findall(r'[A-Za-z#+.]{3,}', str(data.get("basics", {}).get("current_title", ""))))
+    stop = {'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were',
+            'has', 'have', 'been', 'will', 'can', 'not', 'but', 'also', 'such', 'other',
+            'all', 'any', 'each', 'our', 'you', 'your', 'their', 'them', 'who', 'what',
+            'when', 'how', 'more', 'most', 'some', 'than', 'into', 'over', 'about',
+            'experience', 'years', 'role', 'work', 'working', 'strong', 'ability',
+            'team', 'teams', 'including', 'across', 'within', 'using', 'based',
+            'senior', 'junior', 'lead', 'manager', 'head', 'director', 'staff',
+            'full', 'high', 'time', 'level', 'new', 'key', 'well', 'good', 'best',
+            'systems', 'system', 'management', 'client', 'clients', 'project',
+            'projects', 'delivery', 'process', 'service', 'services', 'support',
+            'requirements', 'quality', 'development', 'performance', 'business',
+            'communication', 'skills', 'knowledge', 'solutions', 'environment'}
+    jd_words -= stop
+    cv_terms -= stop
+    overlap = jd_words & cv_terms
+    if not jd_words or not cv_terms:
+        return "MEDIUM"
+    ratio = max(len(overlap) / len(jd_words), len(overlap) / len(cv_terms))
+    if ratio >= 0.15:
+        return "HIGH"
+    elif ratio >= 0.05:
+        return "MEDIUM"
+    else:
+        return "LOW"
 def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, anonymize=False, on_row_update=None, skip_irrelevant=True):
     try:
         total_items = len(items)
@@ -1377,36 +1415,11 @@ def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, 
 
             cbs['progress'](i / total_items, f"Tailoring {current_idx}/{total_items}: {cand_name}{eta_str}", True)
 
-            # --- Pre-screen: quick relevance check (optional) ---
+            # --- Pre-screen: deterministic keyword-overlap relevance check ---
             cand_title = str(item['data']['basics'].get('current_title', '')).strip()
             relevance = 'HIGH'
             if skip_irrelevant:
-                cand_skills = item['data'].get('skills', {})
-                skills_flat = ", ".join(s for cat in cand_skills.values() if isinstance(cat, list) for s in cat[:10])
-                screen_prompt = (
-                    f"Does this candidate have ANY transferable skills or experience relevant to the job description? "
-                    f"Be lenient — if there is even partial overlap in technologies, domain, or role type, answer HIGH or MEDIUM. "
-                    f"Only answer LOW if the candidate's background is completely unrelated (e.g. a farmer applying for a software role). "
-                    f"Reply with ONLY one word: HIGH, MEDIUM, or LOW.\n\n"
-                    f"Candidate: {cand_name}, {cand_title}\nSkills: {skills_flat[:500]}\n\n"
-                    f"Job Description (first 1000 chars):\n{jd_text[:1000]}"
-                )
-                try:
-                    screen_resp = _retry_generate(client, MODEL_NAME, screen_prompt)
-                    s_in = getattr(screen_resp.usage_metadata, 'prompt_token_count', 0)
-                    s_out = getattr(screen_resp.usage_metadata, 'candidates_token_count', 0)
-                    s_cost = (s_in / 1_000_000 * PRICE_1M_IN) + (s_out / 1_000_000 * PRICE_1M_OUT)
-                    session_cost += s_cost
-                    cbs['billing'](s_in, s_out, s_cost)
-                    relevance = (screen_resp.text or '').strip().upper()
-                    for word in relevance.split():
-                        if word in ('HIGH', 'MEDIUM', 'LOW'):
-                            relevance = word
-                            break
-                    else:
-                        relevance = 'MEDIUM'
-                except Exception:
-                    relevance = 'MEDIUM'
+                relevance = _check_relevance(item['data'], jd_text)
 
                 if relevance == 'LOW':
                     cbs['log'](f"   ⏭️ Skipped: {cand_name} — not relevant to JD", "orange")
