@@ -929,6 +929,11 @@ def run_import_task(files_paths, config, folders, task_state, db_files, cbs):
 # ==========================================
 def run_matcher_task(cands, jd_val, config, folders, task_state, cbs, on_complete_cb, on_row_cb=None):
     try:
+        jd_err = validate_jd(jd_val)
+        if jd_err:
+            cbs['log'](f"⚠️ {jd_err}", "red")
+            cbs['progress'](1, "Done", False)
+            return
         cbs['progress'](0, "Calculating ETA...", True)
         cbs['log'](f"Running Matcher on {len(cands)} CVs...", "blue")
         
@@ -1390,8 +1395,36 @@ def _check_relevance(data: dict, jd_text: str) -> str:
         return "MEDIUM"
     else:
         return "LOW"
+
+_JD_MARKERS = {'experience', 'requirements', 'responsibilities', 'qualifications', 'role',
+               'skills', 'position', 'candidate', 'looking for', 'must have', 'nice to have',
+               'employment', 'salary', 'location', 'remote', 'hybrid', 'full-time', 'part-time',
+               'about the role', 'job description', 'what you', 'who you', 'we are looking',
+               'you will', 'you should', 'your role', 'the team', 'reporting to', 'hiring'}
+
+def validate_jd(jd_text: str) -> str | None:
+    """Validate JD text. Returns error message or None if valid."""
+    if not jd_text or not jd_text.strip():
+        return "Job Description is empty."
+    text = jd_text.strip()
+    if len(text) < 50:
+        return f"Job Description is too short ({len(text)} chars). Please provide a full JD."
+    words = text.split()
+    if len(words) < 15:
+        return f"Job Description has only {len(words)} words. Please provide a more detailed JD."
+    text_lower = text.lower()
+    hits = sum(1 for m in _JD_MARKERS if m in text_lower)
+    if hits < 2:
+        return "This doesn't look like a Job Description. Please paste an actual JD with role requirements."
+    return None
+
 def run_tailor_task(items, jd_text, config, folders, task_state, db_files, cbs, anonymize=False, on_row_update=None, skip_irrelevant=True):
     try:
+        jd_err = validate_jd(jd_text)
+        if jd_err:
+            cbs['log'](f"⚠️ {jd_err}", "red")
+            cbs['progress'](1, "Done", False)
+            return
         total_items = len(items)
         cbs['progress'](0, "Calculating ETA...", True)
         cbs['log'](f"Tailoring {total_items} CVs to JD...", "blue")
