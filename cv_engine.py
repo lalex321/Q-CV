@@ -345,7 +345,7 @@ MANDATORY TAILORING ACTIONS (you MUST do ALL of these):
 
 2. **REWRITE SUMMARY (MANDATORY):** You MUST rewrite cv.summary.bullet_points from scratch. Create 4-6 bullet points that directly connect the candidate's real experience to JD requirements. Use JD keywords naturally. Each bullet should address a specific JD requirement using the candidate's actual background. Do NOT copy the original summary unchanged.
 
-3. **REORDER SKILLS (MANDATORY):** Move skill categories and items most relevant to the JD to the TOP. If the JD mentions AWS and the candidate has AWS buried in a list — move it to position #1. Merge small or redundant skill categories. Do NOT create a generic catch-all category like "Tools & Technologies" that duplicates items already listed in other skill groups.
+3. **REORDER SKILLS (MANDATORY):** Move skill categories and items most relevant to the JD to the TOP. If the JD mentions AWS and the candidate has AWS buried in a list — move it to position #1. Merge small or redundant skill categories. Do NOT create a generic catch-all category like "Tools & Technologies" that duplicates items already listed in other skill groups. NEVER create empty skill categories — if the candidate has no skills for a JD-required area, simply omit that category.
 
 4. **REORDER & REPHRASE HIGHLIGHTS (MANDATORY):** For EACH role:
    - Put JD-relevant highlights FIRST.
@@ -2054,7 +2054,62 @@ def extract_text_from_docx(docx_path: str) -> str:
 # ==========================================
 # 4. LLM PROCESSING CORE
 # ==========================================
-def process_file_gemini(file_path, api_key, custom_instructions, task_state=None): 
+
+def _repair_json(s: str) -> str:
+    """Best-effort repair of common LLM JSON errors."""
+    # Fix trailing commas before } or ]
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+    # Fix missing commas between } and { or between "value" and "key"
+    s = re.sub(r'(\})\s*(\{)', r'\1,\2', s)
+    s = re.sub(r'(")\s*\n\s*(")', r'\1,\n\2', s)
+    # Remove control characters except \n \r \t
+    s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', s)
+    return s
+
+
+def extract_first_json_object(text: str):
+    """Extract and parse the first JSON object/array from LLM output,
+    handling markdown fences and malformed JSON."""
+    if text is None:
+        raise ValueError("No text to parse")
+    s = str(text).strip()
+    if not s:
+        raise ValueError("Empty text")
+
+    fence = re.search(r"```(?:json)?\s*(.*?)```", s, re.S | re.I)
+    if fence:
+        s = fence.group(1).strip()
+
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+
+    starts = [i for i in [s.find("{"), s.find("[")] if i != -1]
+    if not starts:
+        raise ValueError("No JSON object or array found")
+
+    start = min(starts)
+    decoder = json.JSONDecoder()
+    try:
+        obj, _ = decoder.raw_decode(s[start:])
+        return obj
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt repair and retry
+    repaired = _repair_json(s[start:])
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        pass
+
+    # Last resort: try raw_decode on repaired text
+    obj, _ = decoder.raw_decode(repaired)
+    return obj
+
+
+def process_file_gemini(file_path, api_key, custom_instructions, task_state=None):
     # 🧠 Concatenate editable instructions and the protected schema
     final_prompt = custom_instructions + f"\n\n**JSON SCHEMA:**\n{CV_JSON_SCHEMA}"
 
@@ -2093,14 +2148,7 @@ def process_file_gemini(file_path, api_key, custom_instructions, task_state=None
     cost = (in_tok / 1_000_000 * PRICE_1M_IN) + (out_tok / 1_000_000 * PRICE_1M_OUT)
     
     if not text: return None, in_tok, out_tok, cost
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        # Attempt repair: fix trailing commas, missing commas between objects
-        repaired = re.sub(r',\s*([}\]])', r'\1', text)
-        repaired = re.sub(r'(\})\s*(\{)', r'\1,\2', repaired)
-        repaired = re.sub(r'(")\s*\n\s*(")', r'\1,\n\2', repaired)
-        data = json.loads(repaired)
+    data = extract_first_json_object(text)
     return sanitize_json(data), in_tok, out_tok, cost
 
 def generate_docx_from_json(data, output_path, cfg):
